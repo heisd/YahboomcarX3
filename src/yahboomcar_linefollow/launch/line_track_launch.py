@@ -11,9 +11,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    default_params = os.path.join(
-        get_package_share_directory('yahboomcar_linefollow'),
-        'params', 'line_track.yaml')
+    share = get_package_share_directory('yahboomcar_linefollow')
+    default_params = os.path.join(share, 'params', 'line_track.yaml')
+    default_hsv    = os.path.join(share, 'params', 'HSV.txt')
 
     params_file = LaunchConfiguration('params_file')
     hsv_file = LaunchConfiguration('hsv_file')
@@ -25,8 +25,10 @@ def generate_launch_description():
             description='YAML file with line_track parameters.'),
         DeclareLaunchArgument(
             'hsv_file',
-            default_value='/tmp/yahboomcar_linefollow_hsv.txt',
-            description='HSV calibration file produced by line_detect.'),
+            default_value=default_hsv,
+            description='HSV calibration file. Defaults to the persistent '
+                        'HSV.txt shipped in this package, updated by '
+                        'line_detect.'),
         Node(
             package='yahboomcar_linefollow',
             executable='line_track',

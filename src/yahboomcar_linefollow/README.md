@@ -7,7 +7,13 @@
 | 检测模式 (detect) | `line_detect` | 打开摄像头，鼠标框选线条样本，自动学习 HSV 阈值并保存到文件 |
 | 跟踪模式 (track)  | `line_track`  | 加载已保存的 HSV，在画面下方 ROI 带内提取线条质心，PID 控制 `/cmd_vel` 巡线 |
 
-两个模式都使用同一个 HSV 文件（默认 `/tmp/yahboomcar_linefollow_hsv.txt`），先用 detect 标定，再用 track 跑车。
+两个模式共用同一个 **持久化** HSV 文件：`params/HSV.txt`，跟随包一起提交到仓库。
+检测模式 **每学到一次新 ROI 就自动覆盖** 这个文件，无需手动按 `s`；之后任何 launch
+（包括 `linefollow_safe_launch.py`）默认就读它，可以直接开跑。
+
+> 建议用 `colcon build --symlink-install`，这样 `<share>/params/HSV.txt` 与源码 `params/HSV.txt`
+> 是符号链接，detect 写回的内容直接落到源码、被 git 跟踪。普通 `colcon build` 写入的是
+> install 空间，下一次 build 会被仓库里的种子覆盖。
 
 ## 目录结构
 
@@ -39,23 +45,29 @@ yahboomcar_linefollow/
 ### 1) 检测模式 — 标定 HSV
 
 ```bash
+# 默认就写 params/HSV.txt，不用再传 hsv_file
+ros2 launch yahboomcar_linefollow line_detect_launch.py
+
+# 想写到别的位置（例如临时 try）：
 ros2 launch yahboomcar_linefollow line_detect_launch.py \
-    camera_index:=0 \
-    hsv_file:=/tmp/yahboomcar_linefollow_hsv.txt
+    hsv_file:=/tmp/try.txt autosave:=false
 ```
 
 在弹出的 `line_detect` 窗口里：
 
-- **鼠标左键拖拽** 在线条上框选一个矩形区域，节点会自动取该 ROI 内像素的 HSV 极值，加一点 padding 作为 inRange 范围，并实时显示二值化结果与最大轮廓质心；
+- **鼠标左键拖拽** 在线条上框选一个矩形区域，节点自动取该 ROI 内像素的 HSV 极值
+  并加 padding，作为 inRange 范围；实时显示二值化结果与最大轮廓质心；
+- **每框一次都会自动覆盖 `hsv_file`**（受 `autosave` 控制，默认 `true`），
+  跟踪模式可以直接接着用；
 - 框得不好就 **`r`** 重置后重新框；
-- 满意后按 **`s`** 把 HSV 写到 `hsv_file`；
+- 也可以按 **`s`** 手动再保存一次；
 - **`q` / ESC** 退出。
 
 ### 2) 跟踪模式 — 自主巡线
 
 ```bash
-ros2 launch yahboomcar_linefollow line_track_launch.py \
-    hsv_file:=/tmp/yahboomcar_linefollow_hsv.txt
+# 默认读 params/HSV.txt
+ros2 launch yahboomcar_linefollow line_track_launch.py
 ```
 
 - 节点读取 `hsv_file`，在画面下方 `roi_top_ratio ~ roi_bottom_ratio` 的水平带内做掩膜，取最大轮廓的质心 `cx`；
@@ -75,6 +87,41 @@ ros2 param set /line_track linear 0.2
 ros2 param set /line_track switch false      # 临时停车，节点继续运行
 ros2 param set /line_track roi_top_ratio 0.7
 ```
+
+### 3) 巡线 + IMU 防撞（推荐）
+
+只把 `yahboomcar_collision/collision_detector` 和 `line_track` 同时跑起来 **不够** ——
+`line_track` 以 ~33 Hz 持续发布 `/cmd_vel`，碰撞节点发出的那一帧零速会被下一帧立刻覆盖，
+车不会真正停。本包提供一个胶水 launch + 在 `line_track` 内部加了一层 **collision hold-off**：
+
+- `line_track` 订阅 `collision_topic`（默认 `/collision_detector/collision`）；
+- 一收到 `True` 脉冲就进入 `collision_pause_sec` 秒的 hold-off：
+  期间持续发零 Twist + 清 PID 积分 + 在画面上叠加 `COLLISION HOLD`；
+- 胶水 launch 顺便把 `collision_detector` 的 `stop_on_collision` 关掉，避免两边抢 `/cmd_vel`。
+
+```bash
+# 默认直接读 params/HSV.txt，标定过一次后即可一键运行
+ros2 launch yahboomcar_linefollow linefollow_safe_launch.py \
+    linear:=0.15 \
+    accel_threshold:=12.0 \
+    collision_pause_sec:=2.0
+```
+
+常用 launch 参数：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `linear` | `0.15` | 巡线前进速度 (m/s) |
+| `collision_pause_sec` | `2.0` | 撞到后暂停时长（秒）|
+| `imu_topic` | `imu/data_raw` | IMU 话题 |
+| `accel_threshold` | `12.0` | 加速度冲击阈值 (m/s²)，默认偏高减少误判 |
+| `gyro_threshold` | `6.0` | 角速度冲击阈值 (rad/s) |
+| `use_gyro` | `false` | 启用加速度+角速度双判据 |
+| `min_trigger_samples` | `2` | 连续帧去毛刺 |
+| `cooldown_sec` | `1.5` | 碰撞器自身去重冷却 |
+
+> 想把 IMU 防撞接到其它自主节点，复刻 `line_track` 里的两段代码即可：
+> 订阅 `Bool` 的碰撞话题、在 timer 里检查 `now < hold_until`，hold 期间发零 Twist。
 
 ## 话题
 
