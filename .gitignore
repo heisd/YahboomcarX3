@@ -1,0 +1,6 @@
+install/
+build/
+log/
+*.gv
+*.pdf
+.vscode/
