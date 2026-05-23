@@ -76,6 +76,41 @@ ros2 param set /line_track switch false      # 临时停车，节点继续运行
 ros2 param set /line_track roi_top_ratio 0.7
 ```
 
+### 3) 巡线 + IMU 防撞（推荐）
+
+只把 `yahboomcar_collision/collision_detector` 和 `line_track` 同时跑起来 **不够** ——
+`line_track` 以 ~33 Hz 持续发布 `/cmd_vel`，碰撞节点发出的那一帧零速会被下一帧立刻覆盖，
+车不会真正停。本包提供一个胶水 launch + 在 `line_track` 内部加了一层 **collision hold-off**：
+
+- `line_track` 订阅 `collision_topic`（默认 `/collision_detector/collision`）；
+- 一收到 `True` 脉冲就进入 `collision_pause_sec` 秒的 hold-off：
+  期间持续发零 Twist + 清 PID 积分 + 在画面上叠加 `COLLISION HOLD`；
+- 胶水 launch 顺便把 `collision_detector` 的 `stop_on_collision` 关掉，避免两边抢 `/cmd_vel`。
+
+```bash
+ros2 launch yahboomcar_linefollow linefollow_safe_launch.py \
+    hsv_file:=/tmp/yahboomcar_linefollow_hsv.txt \
+    linear:=0.15 \
+    accel_threshold:=12.0 \
+    collision_pause_sec:=2.0
+```
+
+常用 launch 参数：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `linear` | `0.15` | 巡线前进速度 (m/s) |
+| `collision_pause_sec` | `2.0` | 撞到后暂停时长（秒）|
+| `imu_topic` | `imu/data_raw` | IMU 话题 |
+| `accel_threshold` | `12.0` | 加速度冲击阈值 (m/s²)，默认偏高减少误判 |
+| `gyro_threshold` | `6.0` | 角速度冲击阈值 (rad/s) |
+| `use_gyro` | `false` | 启用加速度+角速度双判据 |
+| `min_trigger_samples` | `2` | 连续帧去毛刺 |
+| `cooldown_sec` | `1.5` | 碰撞器自身去重冷却 |
+
+> 想把 IMU 防撞接到其它自主节点，复刻 `line_track` 里的两段代码即可：
+> 订阅 `Bool` 的碰撞话题、在 timer 里检查 `now < hold_until`，hold 期间发零 Twist。
+
 ## 话题
 
 | 方向 | 话题 | 类型 | 节点 |

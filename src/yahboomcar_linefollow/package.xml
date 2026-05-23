@@ -13,6 +13,10 @@
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
 
+  <!-- Optional runtime companion: linefollow_safe_launch.py also spawns
+       a collision_detector node from this package. -->
+  <exec_depend>yahboomcar_collision</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

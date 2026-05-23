@@ -62,6 +62,12 @@ class LineTrack(Node):
         self.declare_parameter('kd', 0.4)
         self.declare_parameter('show_window', True)
         self.declare_parameter('switch', True)
+        # Glue with yahboomcar_collision: when a True pulse arrives on
+        # `collision_topic`, stop publishing motion for `collision_pause_sec`
+        # seconds and reset the PID. Set the topic empty to disable.
+        self.declare_parameter('collision_topic',
+                               '/collision_detector/collision')
+        self.declare_parameter('collision_pause_sec', 2.0)
 
         self.cam_index = self.get_parameter('camera_index').value
         self.w = int(self.get_parameter('frame_width').value)
@@ -80,6 +86,15 @@ class LineTrack(Node):
         self.sub_joy = self.create_subscription(
             Bool, '/JoyState', self._on_joy, 1)
         self.joy_active = False
+
+        # collision hold-off state
+        self._collision_hold_until = self.get_clock().now()
+        collision_topic = self.get_parameter('collision_topic').value
+        if collision_topic:
+            self.sub_collision = self.create_subscription(
+                Bool, collision_topic, self._on_collision, 10)
+            self.get_logger().info(
+                f'collision hold-off listening on "{collision_topic}"')
 
         self.pid = SimplePID(
             kp=float(self.get_parameter('kp').value),
@@ -108,6 +123,19 @@ class LineTrack(Node):
             self.pid.reset()
             self.pub_cmd.publish(Twist())
 
+    def _on_collision(self, msg):
+        if not msg.data:
+            return
+        pause = float(self.get_parameter('collision_pause_sec').value)
+        dt = rclpy.duration.Duration(
+            seconds=int(pause),
+            nanoseconds=int((pause % 1) * 1e9))
+        self._collision_hold_until = self.get_clock().now() + dt
+        self.pid.reset()
+        self.pub_cmd.publish(Twist())
+        self.get_logger().warn(
+            f'collision flag received -- pausing line-follow for {pause:.1f}s')
+
     def _refresh_params(self):
         self.pid.kp = float(self.get_parameter('kp').value)
         self.pid.ki = float(self.get_parameter('ki').value)
@@ -134,8 +162,13 @@ class LineTrack(Node):
         centroid = largest_contour_centroid(binary)
 
         twist = Twist()
-        enabled = bool(self.get_parameter('switch').value) and not self.joy_active
+        in_collision_hold = self.get_clock().now() < self._collision_hold_until
+        enabled = (bool(self.get_parameter('switch').value)
+                   and not self.joy_active
+                   and not in_collision_hold)
         linear = float(self.get_parameter('linear').value)
+        if in_collision_hold:
+            self.pid.reset()
 
         if centroid is not None:
             cx, cy, _area, cnt = centroid
@@ -156,6 +189,10 @@ class LineTrack(Node):
             if self.show:
                 cv.putText(frame, 'no line', (10, 20),
                            cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        if self.show and in_collision_hold:
+            cv.putText(frame, 'COLLISION HOLD', (10, 60),
+                       cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         self.pub_cmd.publish(twist)
 
