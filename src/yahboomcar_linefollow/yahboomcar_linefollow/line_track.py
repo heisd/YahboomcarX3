@@ -34,6 +34,8 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 
+from ament_index_python.packages import get_package_share_directory
+
 from .line_common import (
     read_hsv,
     mask_with_hsv,
@@ -44,6 +46,12 @@ from .line_common import (
 WINDOW = 'line_track'
 
 
+def _default_hsv_path():
+    return os.path.join(
+        get_package_share_directory('yahboomcar_linefollow'),
+        'params', 'HSV.txt')
+
+
 class LineTrack(Node):
     def __init__(self):
         super().__init__('line_track')
@@ -51,8 +59,7 @@ class LineTrack(Node):
         self.declare_parameter('camera_index', 0)
         self.declare_parameter('frame_width', 640)
         self.declare_parameter('frame_height', 480)
-        self.declare_parameter('hsv_file',
-                               os.path.expanduser('~/.yahboomcar_linefollow_hsv.txt'))
+        self.declare_parameter('hsv_file', _default_hsv_path())
         self.declare_parameter('roi_top_ratio', 0.65)
         self.declare_parameter('roi_bottom_ratio', 1.0)
         self.declare_parameter('linear', 0.15)

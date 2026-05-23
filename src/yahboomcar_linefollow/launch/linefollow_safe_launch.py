@@ -33,14 +33,14 @@ COLLISION_FLAG_TOPIC = '/collision_detector/collision'
 
 
 def generate_launch_description():
-    default_params = os.path.join(
-        get_package_share_directory('yahboomcar_linefollow'),
-        'params', 'line_track.yaml')
+    share = get_package_share_directory('yahboomcar_linefollow')
+    default_params = os.path.join(share, 'params', 'line_track.yaml')
+    default_hsv    = os.path.join(share, 'params', 'HSV.txt')
 
     args = [
         # ---- shared ----
-        DeclareLaunchArgument('hsv_file',
-            default_value='/tmp/yahboomcar_linefollow_hsv.txt'),
+        DeclareLaunchArgument('hsv_file', default_value=default_hsv,
+            description='Persistent HSV file, kept in sync by line_detect.'),
         DeclareLaunchArgument('params_file', default_value=default_params),
 
         # ---- line_track overrides ----

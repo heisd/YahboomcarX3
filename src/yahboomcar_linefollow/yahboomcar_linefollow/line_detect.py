@@ -21,6 +21,8 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
+from ament_index_python.packages import get_package_share_directory
+
 from .line_common import (
     hsv_from_roi,
     mask_with_hsv,
@@ -32,6 +34,20 @@ from .line_common import (
 WINDOW = 'line_detect'
 
 
+def _default_hsv_path():
+    """Persistent HSV file inside the package's share/params directory.
+
+    With `colcon build --symlink-install` (the common dev workflow) this
+    points back to the source tree, so writes survive across runs and can
+    be committed to git. Without symlink-install it lives in install
+    space and gets reset on the next colcon build -- so prefer the
+    symlinked workflow if you want HSV.txt to be sticky.
+    """
+    return os.path.join(
+        get_package_share_directory('yahboomcar_linefollow'),
+        'params', 'HSV.txt')
+
+
 class LineDetect(Node):
     def __init__(self):
         super().__init__('line_detect')
@@ -40,8 +56,8 @@ class LineDetect(Node):
         self.declare_parameter('camera_index', 0)
         self.declare_parameter('frame_width', 640)
         self.declare_parameter('frame_height', 480)
-        self.declare_parameter('hsv_file',
-                               os.path.expanduser('~/.yahboomcar_linefollow_hsv.txt'))
+        self.declare_parameter('hsv_file', _default_hsv_path())
+        self.declare_parameter('autosave', True)
 
         self.cam_index = self.get_parameter('camera_index').value
         self.w = int(self.get_parameter('frame_width').value)
@@ -95,6 +111,21 @@ class LineDetect(Node):
             self.get_logger().info(
                 f'learned HSV  lo={lo}  hi={hi}')
             self._publish_status(f'learned {lo}-{hi}')
+            # Persist immediately so the same HSV.txt is ready for the
+            # tracker / safe launch without any extra keystroke.
+            if bool(self.get_parameter('autosave').value):
+                self._save_hsv()
+
+    def _save_hsv(self):
+        if not self.hsv_range:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.hsv_file), exist_ok=True)
+            write_hsv(self.hsv_file, self.hsv_range)
+            self.get_logger().info(f'HSV.txt updated -> {self.hsv_file}')
+            self._publish_status(f'saved {self.hsv_file}')
+        except OSError as e:
+            self.get_logger().error(f'cannot write {self.hsv_file}: {e}')
 
     def _publish_status(self, text):
         msg = String()
@@ -149,10 +180,7 @@ class LineDetect(Node):
         if key in (ord('q'), 27):
             self._shutdown()
         elif key == ord('s'):
-            if self.hsv_range:
-                write_hsv(self.hsv_file, self.hsv_range)
-                self.get_logger().info(f'saved HSV to {self.hsv_file}')
-                self._publish_status(f'saved to {self.hsv_file}')
+            self._save_hsv()
         elif key == ord('r'):
             self.hsv_range = ()
             self.roi = None
