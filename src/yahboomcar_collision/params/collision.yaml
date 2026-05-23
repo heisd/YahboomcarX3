@@ -1,0 +1,16 @@
+collision_detector:
+  ros__parameters:
+    imu_topic: imu/data_raw
+
+    # Conservative defaults (high thresholds) to minimise false positives.
+    # Tune lower for a more sensitive bumper.
+    accel_threshold: 12.0       # m/s^2 over the running baseline
+    gyro_threshold: 6.0         # rad/s over the running baseline
+    use_gyro: false             # if true, also require a gyro spike
+
+    baseline_alpha: 0.02        # EMA weight for the baseline
+    min_trigger_samples: 2      # debounce window in IMU samples
+    cooldown_sec: 1.5
+
+    stop_on_collision: true
+    cmd_vel_topic: /cmd_vel
