@@ -304,6 +304,24 @@ class DashboardNode(Node):
 # -------- HTTP server ------------------------------------------------------
 
 def make_handler(state: SharedState, web_dir: str, node: 'DashboardNode'):
+    # Resolve once so we can enforce containment on every request.
+    web_root = os.path.realpath(web_dir)
+
+    def safe_join(rel: str):
+        """Resolve rel under web_root, or return None if it escapes."""
+        # reject absolute paths and any path with traversal components up front
+        if not rel or rel.startswith('/') or rel.startswith('\\'):
+            return None
+        # split on both separators; reject empty / dot / dotdot segments
+        for part in rel.replace('\\', '/').split('/'):
+            if part in ('', '.', '..'):
+                return None
+        candidate = os.path.realpath(os.path.join(web_root, rel))
+        # must be strictly inside web_root (use sep to avoid prefix collisions)
+        if candidate != web_root and not candidate.startswith(
+                web_root + os.sep):
+            return None
+        return candidate
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # silence default access log
@@ -330,8 +348,11 @@ def make_handler(state: SharedState, web_dir: str, node: 'DashboardNode'):
             # static assets under /web/
             if path.startswith('/web/'):
                 rel = path[len('/web/'):]
-                self._serve_file(os.path.join(web_dir, rel),
-                                 self._guess_type(rel))
+                resolved = safe_join(rel)
+                if resolved is None:
+                    self._send(403, b'forbidden', 'text/plain')
+                    return
+                self._serve_file(resolved, self._guess_type(rel))
                 return
             self._send(404, b'not found', 'text/plain')
 
@@ -359,10 +380,13 @@ def make_handler(state: SharedState, web_dir: str, node: 'DashboardNode'):
 
         def _serve_file(self, fpath, ctype):
             try:
+                if not os.path.isfile(fpath):
+                    self._send(404, b'not found', 'text/plain')
+                    return
                 with open(fpath, 'rb') as f:
                     body = f.read()
                 self._send(200, body, ctype)
-            except FileNotFoundError:
+            except (FileNotFoundError, IsADirectoryError, PermissionError):
                 self._send(404, b'not found', 'text/plain')
 
         @staticmethod
