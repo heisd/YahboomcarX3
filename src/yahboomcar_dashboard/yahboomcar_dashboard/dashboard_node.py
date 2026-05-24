@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+# encoding: utf-8
+"""
+Yahboomcar X3 Web Dashboard.
+
+Subscribes to chassis / IMU / odom / lidar / safety topics, tracks each
+device's last-seen timestamp to infer connection status, and serves a
+single-page web dashboard over an embedded HTTP server (Python stdlib,
+no Flask required).
+
+URL:  http://<robot-ip>:8088/
+API:  GET /api/state -> JSON snapshot (polled by the frontend at ~10 Hz)
+"""
+
+import json
+import math
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+from std_msgs.msg import Bool, Float32, Int32
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Imu, LaserScan
+from nav_msgs.msg import Odometry
+
+from ament_index_python.packages import get_package_share_directory
+
+
+# -------- helpers ----------------------------------------------------------
+
+def quat_to_rpy(x, y, z, w):
+    # roll (X), pitch (Y), yaw (Z)
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * (w * y - z * x)
+    sinp = max(-1.0, min(1.0, sinp))
+    pitch = math.asin(sinp)
+
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return roll, pitch, yaw
+
+
+# -------- shared state -----------------------------------------------------
+
+class SharedState:
+    """Thread-safe snapshot consumed by the HTTP handler."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._data = {
+            # chassis / battery
+            'voltage': None,
+            'edition': None,
+            'safety_ok': None,
+            # commanded velocity
+            'cmd_vel': {'vx': 0.0, 'vy': 0.0, 'vz': 0.0,
+                        'wx': 0.0, 'wy': 0.0, 'wz': 0.0},
+            # actual velocity from vel_raw
+            'vel_raw': {'vx': 0.0, 'vy': 0.0, 'vz': 0.0,
+                        'wx': 0.0, 'wy': 0.0, 'wz': 0.0},
+            # odometry (pose + velocity in odom frame)
+            'odom': {
+                'x': 0.0, 'y': 0.0, 'z': 0.0,
+                'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+                'vx': 0.0, 'vy': 0.0, 'vz': 0.0,
+                'wx': 0.0, 'wy': 0.0, 'wz': 0.0,
+            },
+            # IMU
+            'imu': {
+                'ax': 0.0, 'ay': 0.0, 'az': 0.0,
+                'wx': 0.0, 'wy': 0.0, 'wz': 0.0,
+                'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+            },
+            # lidar quick stats
+            'scan': {'count': 0, 'min': 0.0, 'max': 0.0},
+            # collision / joy flags
+            'collision': None,
+            'joy_state': None,
+            # device last-seen timestamps (wall clock, seconds)
+            'last_seen': {},
+        }
+
+    def set(self, key, value):
+        with self._lock:
+            self._data[key] = value
+
+    def touch(self, device, now):
+        with self._lock:
+            self._data['last_seen'][device] = now
+
+    def snapshot(self, now):
+        with self._lock:
+            data = json.loads(json.dumps(self._data))  # deep copy
+        # derive connection status from staleness
+        timeouts = {
+            'chassis': 2.0,    # voltage @ 10 Hz
+            'imu': 1.0,        # imu/data_raw @ ~50 Hz
+            'odom': 2.0,
+            'lidar': 2.0,
+            'cmd_vel': 2.0,
+            'safety': 5.0,
+            'joy': 5.0,
+        }
+        devices = {}
+        for dev, timeout in timeouts.items():
+            ts = data['last_seen'].get(dev)
+            if ts is None:
+                devices[dev] = {'connected': False, 'age': None}
+            else:
+                age = now - ts
+                devices[dev] = {'connected': age < timeout, 'age': round(age, 2)}
+        data['devices'] = devices
+        data['server_time'] = now
+        return data
+
+
+# -------- ROS node ---------------------------------------------------------
+
+class DashboardNode(Node):
+    def __init__(self, state: SharedState):
+        super().__init__('yahboomcar_dashboard')
+        self.state = state
+
+        # sensor data can be lossy; use BEST_EFFORT for IMU/scan
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
+
+        self.create_subscription(Float32, 'voltage', self._on_voltage, 10)
+        self.create_subscription(Float32, 'edition', self._on_edition, 10)
+        self.create_subscription(Bool, 'safety_status', self._on_safety, 10)
+        self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
+        self.create_subscription(Twist, 'vel_raw', self._on_vel_raw, 10)
+        self.create_subscription(Odometry, 'odom', self._on_odom, 10)
+        self.create_subscription(Imu, 'imu/data_raw', self._on_imu, sensor_qos)
+        self.create_subscription(LaserScan, 'scan', self._on_scan, sensor_qos)
+        self.create_subscription(Bool, 'collision', self._on_collision, 10)
+        self.create_subscription(Bool, 'JoyState', self._on_joy, 10)
+
+        self.get_logger().info('yahboomcar_dashboard node started.')
+
+    @staticmethod
+    def _now():
+        import time
+        return time.time()
+
+    # --- callbacks --------------------------------------------------------
+
+    def _on_voltage(self, msg: Float32):
+        self.state.set('voltage', round(float(msg.data), 2))
+        self.state.touch('chassis', self._now())
+
+    def _on_edition(self, msg: Float32):
+        self.state.set('edition', round(float(msg.data), 2))
+        self.state.touch('chassis', self._now())
+
+    def _on_safety(self, msg: Bool):
+        self.state.set('safety_ok', bool(msg.data))
+        self.state.touch('safety', self._now())
+
+    def _on_cmd_vel(self, msg: Twist):
+        self.state.set('cmd_vel', {
+            'vx': msg.linear.x, 'vy': msg.linear.y, 'vz': msg.linear.z,
+            'wx': msg.angular.x, 'wy': msg.angular.y, 'wz': msg.angular.z,
+        })
+        self.state.touch('cmd_vel', self._now())
+
+    def _on_vel_raw(self, msg: Twist):
+        self.state.set('vel_raw', {
+            'vx': msg.linear.x, 'vy': msg.linear.y, 'vz': msg.linear.z,
+            'wx': msg.angular.x, 'wy': msg.angular.y, 'wz': msg.angular.z,
+        })
+
+    def _on_odom(self, msg: Odometry):
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        t = msg.twist.twist
+        roll, pitch, yaw = quat_to_rpy(q.x, q.y, q.z, q.w)
+        self.state.set('odom', {
+            'x': p.x, 'y': p.y, 'z': p.z,
+            'roll': roll, 'pitch': pitch, 'yaw': yaw,
+            'vx': t.linear.x, 'vy': t.linear.y, 'vz': t.linear.z,
+            'wx': t.angular.x, 'wy': t.angular.y, 'wz': t.angular.z,
+        })
+        self.state.touch('odom', self._now())
+
+    def _on_imu(self, msg: Imu):
+        q = msg.orientation
+        roll, pitch, yaw = quat_to_rpy(q.x, q.y, q.z, q.w)
+        self.state.set('imu', {
+            'ax': msg.linear_acceleration.x,
+            'ay': msg.linear_acceleration.y,
+            'az': msg.linear_acceleration.z,
+            'wx': msg.angular_velocity.x,
+            'wy': msg.angular_velocity.y,
+            'wz': msg.angular_velocity.z,
+            'roll': roll, 'pitch': pitch, 'yaw': yaw,
+        })
+        self.state.touch('imu', self._now())
+
+    def _on_scan(self, msg: LaserScan):
+        ranges = [r for r in msg.ranges
+                  if not math.isnan(r) and not math.isinf(r) and r > 0.0]
+        if ranges:
+            self.state.set('scan', {
+                'count': len(ranges),
+                'min': round(min(ranges), 3),
+                'max': round(max(ranges), 3),
+            })
+        self.state.touch('lidar', self._now())
+
+    def _on_collision(self, msg: Bool):
+        self.state.set('collision', bool(msg.data))
+
+    def _on_joy(self, msg: Bool):
+        self.state.set('joy_state', bool(msg.data))
+        self.state.touch('joy', self._now())
+
+
+# -------- HTTP server ------------------------------------------------------
+
+def make_handler(state: SharedState, web_dir: str):
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):  # silence default access log
+            pass
+
+        def _send(self, code, body, content_type):
+            self.send_response(code)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            import time
+            path = self.path.split('?', 1)[0]
+            if path in ('/', '/index.html'):
+                self._serve_file(os.path.join(web_dir, 'index.html'),
+                                 'text/html; charset=utf-8')
+                return
+            if path == '/api/state':
+                payload = json.dumps(state.snapshot(time.time())).encode('utf-8')
+                self._send(200, payload, 'application/json')
+                return
+            # static assets under /web/
+            if path.startswith('/web/'):
+                rel = path[len('/web/'):]
+                self._serve_file(os.path.join(web_dir, rel),
+                                 self._guess_type(rel))
+                return
+            self._send(404, b'not found', 'text/plain')
+
+        def _serve_file(self, fpath, ctype):
+            try:
+                with open(fpath, 'rb') as f:
+                    body = f.read()
+                self._send(200, body, ctype)
+            except FileNotFoundError:
+                self._send(404, b'not found', 'text/plain')
+
+        @staticmethod
+        def _guess_type(name):
+            if name.endswith('.html'):
+                return 'text/html; charset=utf-8'
+            if name.endswith('.js'):
+                return 'application/javascript'
+            if name.endswith('.css'):
+                return 'text/css'
+            if name.endswith('.svg'):
+                return 'image/svg+xml'
+            return 'application/octet-stream'
+
+    return Handler
+
+
+def find_web_dir():
+    # 1) installed share dir
+    try:
+        share = get_package_share_directory('yahboomcar_dashboard')
+        cand = os.path.join(share, 'web')
+        if os.path.isdir(cand):
+            return cand
+    except Exception:
+        pass
+    # 2) sibling of this source file (works with colcon --symlink-install)
+    here = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.join(here, 'web')
+    if os.path.isdir(cand):
+        return cand
+    raise RuntimeError('Could not locate dashboard web/ assets.')
+
+
+# -------- main -------------------------------------------------------------
+
+def main(args=None):
+    rclpy.init(args=args)
+    state = SharedState()
+    node = DashboardNode(state)
+
+    node.declare_parameter('host', '0.0.0.0')
+    node.declare_parameter('port', 8088)
+    host = node.get_parameter('host').get_parameter_value().string_value
+    port = node.get_parameter('port').get_parameter_value().integer_value
+
+    web_dir = find_web_dir()
+    handler_cls = make_handler(state, web_dir)
+    httpd = ThreadingHTTPServer((host, port), handler_cls)
+
+    server_thread = threading.Thread(
+        target=httpd.serve_forever, name='dashboard-http', daemon=True)
+    server_thread.start()
+    node.get_logger().info(f'Dashboard serving on http://{host}:{port}/')
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
