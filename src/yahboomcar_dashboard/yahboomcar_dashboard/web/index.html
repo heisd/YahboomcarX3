@@ -590,6 +590,9 @@ async function poll() {
     document.getElementById('scan-max').textContent =
       s.scan.max != null ? s.scan.max + ' m' : '-- m';
 
+    // feed the same payload into the map so the two views stay in sync
+    updateMapFromState(s);
+
     // charts
     pushSeries(series.v, { vx: o.vx, vy: o.vy, vz: o.vz });
     pushSeries(series.a, { ax: im.ax, ay: im.ay, az: im.az });
@@ -869,33 +872,21 @@ function renderMap() {
 }
 setInterval(renderMap, 100);
 
-// hook into poll() output: extend the existing poll to capture map data
-const _origPoll = poll;
-window.poll = async function() {
-  await _origPoll();
-};
-// instead of monkey-patching, just observe the DOM-updated state from the
-// previous poll cycle via the same fetch. Easier: do our own light fetch
-// pass that only consumes map-relevant fields.
-async function mapTick() {
-  try {
-    const r = await fetch('/api/state', { cache: 'no-store' });
-    if (!r.ok) return;
-    const s = await r.json();
-    const o = s.odom;
-    mapState.robot = { x: o.x, y: o.y, yaw: o.yaw, valid: true };
-    mapState.scanXY = s.scan_xy || [];
-    // append trajectory only when moved >2cm to keep buffer small
-    const last = mapState.lastTrajPoint;
-    if (!last || Math.hypot(o.x - last[0], o.y - last[1]) > 0.02) {
-      mapState.trajectory.push([o.x, o.y]);
-      mapState.lastTrajPoint = [o.x, o.y];
-      if (mapState.trajectory.length > 2000) mapState.trajectory.shift();
-    }
-    document.getElementById('map-traj-count').textContent = mapState.trajectory.length;
-  } catch (_) { /* network blip; ignored */ }
+// Fed by poll() from the shared /api/state payload — no separate fetch,
+// so the map and the rest of the dashboard always render the same snapshot.
+function updateMapFromState(s) {
+  const o = s.odom;
+  mapState.robot = { x: o.x, y: o.y, yaw: o.yaw, valid: true };
+  mapState.scanXY = s.scan_xy || [];
+  // append trajectory only when moved >2cm to keep buffer small
+  const last = mapState.lastTrajPoint;
+  if (!last || Math.hypot(o.x - last[0], o.y - last[1]) > 0.02) {
+    mapState.trajectory.push([o.x, o.y]);
+    mapState.lastTrajPoint = [o.x, o.y];
+    if (mapState.trajectory.length > 2000) mapState.trajectory.shift();
+  }
+  document.getElementById('map-traj-count').textContent = mapState.trajectory.length;
 }
-setInterval(mapTick, 150);  // ~6-7 Hz is plenty for the map
 
 // map controls
 document.getElementById('map-zoom-in').addEventListener('click', () => {
