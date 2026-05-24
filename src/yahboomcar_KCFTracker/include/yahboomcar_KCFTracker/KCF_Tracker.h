@@ -22,19 +22,28 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/string.hpp"
+#include "std_msgs/msg/float32.hpp"
 #include <time.h>
 
 using namespace std;
 using namespace cv;
 using std::placeholders::_1;
 
+// Closed-loop tracking state: TRACKING when KCF response is healthy, LOST when
+// confidence drops below threshold for too long, RECOVERING while we try to
+// re-acquire the target by colour-histogram back-projection.
+enum class TrackState { IDLE, TRACKING, LOST, RECOVERING };
+
 class ImageConverter :public rclcpp::Node{
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr Joy_sub_;
-    
+
 public:
     ImageConverter():Node("image_converter")
     {
@@ -55,7 +64,12 @@ public:
     this->declare_parameter<float>("angular_KD_",2.0);
     this->declare_parameter<float>("minDist_",1.0);
     this->declare_parameter<bool>("refresh_",false);
-     
+    // Closed-loop re-detection parameters
+    this->declare_parameter<double>("lost_threshold", 0.15);     // peak below this for N frames -> LOST
+    this->declare_parameter<double>("recover_threshold", 0.30);  // re-init when redetector score above this
+    this->declare_parameter<int>("lost_patience", 8);            // consecutive low-confidence frames before LOST
+    this->declare_parameter<bool>("enable_redetect", true);
+
         
     this->get_parameter<float>("linear_KP_",linear_KP);
     this->get_parameter<float>("linear_KI_",linear_KI);
@@ -76,6 +90,13 @@ public:
         //pub
         image_pub_=this->create_publisher<sensor_msgs::msg::Image>("/KCF_image",1);
         vel_pub_ =this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel",1);
+        status_pub_ = this->create_publisher<std_msgs::msg::String>("/KCF_status", 1);
+        confidence_pub_ = this->create_publisher<std_msgs::msg::Float32>("/KCF_confidence", 1);
+
+        this->get_parameter<double>("lost_threshold", lost_threshold);
+        this->get_parameter<double>("recover_threshold", recover_threshold);
+        this->get_parameter<int>("lost_patience", lost_patience);
+        this->get_parameter<bool>("enable_redetect", enable_redetect);
     }
     //ros::Publisher pub;
     PID *linear_PID;
@@ -99,6 +120,23 @@ public:
     bool LAB = false;
     int center_x;
     KCFTracker tracker;
+
+    // Closed-loop re-detection state
+    TrackState track_state = TrackState::IDLE;
+    double lost_threshold = 0.15;
+    double recover_threshold = 0.30;
+    int lost_patience = 8;
+    bool enable_redetect = true;
+    int low_conf_count = 0;
+    float last_peak_value = 0.0f;
+    cv::Mat target_hist;          // HSV hue histogram of the originally selected target
+    cv::Size target_size;         // remembered ROI size for re-init
+    bool has_target_model = false;
+
+    void buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi);
+    bool redetect(const cv::Mat &bgr, cv::Rect &found);
+    void publishStatus(const std::string &s);
+    void publishConfidence(float v);
     
     //dynamic_reconfigure::Server<yahboomcar_astra::KCFTrackerPIDConfig> server;
     //dynamic_reconfigure::Server<yahboomcar_astra::KCFTrackerPIDConfig>::CallbackType f;
