@@ -73,8 +73,15 @@ KCF 本身是开环短时跟踪器，目标被遮挡 / 出视野后会跟丢且�
 | `lost_patience` | `8` | 连续多少低置信度帧后判定丢失 |
 | `recover_threshold` | `0.30` | 反向投影平均响应阈值，超过则恢复 |
 | `enable_redetect` | `true` | 关掉后退化为原始开环 KCF |
+| `hue_bins` | `32` | 重检测 HSV 色调直方图 bin 数（外观模型分辨率） |
+| `sat_min` | `30` | HSV 掩膜的 S 通道下限，过滤过白 / 灰像素 |
+| `val_min` | `30` | HSV 掩膜的 V 通道下限，过滤过暗像素 |
 | `collision_topic` | `/collision_detector/collision` | 碰撞 Bool 脉冲来源 |
 | `collision_pause_sec` | `2.0` | 收到碰撞脉冲后冻结 `/cmd_vel` 的秒数 |
+
+> `sat_min` / `val_min` / `hue_bins` 都支持运行时 `ros2 param set` 现场微调：
+> `sat_min` / `val_min` 在每帧 `redetect` 都会重读，立即生效；
+> `hue_bins` 改了之后想让外观模板真正用上新分辨率，需要重选 ROI（直方图是框选时一次性算的）。
 
 ## 与 collision_detector 联动 (glue launch)
 

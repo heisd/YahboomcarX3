@@ -104,20 +104,29 @@ void ImageConverter::publishConfidence(float v) {
 // 对目标 ROI 计算 HSV 色调直方图，作为重检测时的外观模板。
 // 通过 saturation / value 阈值掩膜过滤低信息像素，
 // 让直方图在轻度光照变化下仍有辨识度。
+// hue_bins / sat_min / val_min 都来自 ROS 参数，每次进入函数都
+// 重新读一次，支持 `ros2 param set` 现场调（注意：直方图是在 ROI 框
+// 选时一次性算出来的，改了阈值后想让新的模型生效需要重选 ROI）。
 void ImageConverter::buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi) {
     cv::Rect safe = roi & cv::Rect(0, 0, bgr.cols, bgr.rows);
     if (safe.width < 4 || safe.height < 4) {
         has_target_model = false;
         return;
     }
+    this->get_parameter<int>("hue_bins", hue_bins);
+    this->get_parameter<int>("sat_min", sat_min);
+    this->get_parameter<int>("val_min", val_min);
+    int bins = std::max(2, std::min(180, hue_bins));
+    int smin = std::max(0, std::min(255, sat_min));
+    int vmin = std::max(0, std::min(255, val_min));
+
     cv::Mat hsv, mask;
     cv::cvtColor(bgr(safe), hsv, cv::COLOR_BGR2HSV);
-    cv::inRange(hsv, cv::Scalar(0, 30, 30), cv::Scalar(180, 255, 255), mask);
-    int histSize = 32;
+    cv::inRange(hsv, cv::Scalar(0, smin, vmin), cv::Scalar(180, 255, 255), mask);
     float hrange[] = {0, 180};
     const float *ranges = hrange;
     int channels = 0;
-    cv::calcHist(&hsv, 1, &channels, mask, target_hist, 1, &histSize, &ranges, true, false);
+    cv::calcHist(&hsv, 1, &channels, mask, target_hist, 1, &bins, &ranges, true, false);
     cv::normalize(target_hist, target_hist, 0, 255, cv::NORM_MINMAX);
     target_size = safe.size();
     has_target_model = true;
@@ -130,9 +139,15 @@ void ImageConverter::buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi) {
 bool ImageConverter::redetect(const cv::Mat &bgr, cv::Rect &found) {
     if (!has_target_model || target_hist.empty()) return false;
 
+    // 在搜索时也每帧重读 sat_min / val_min，方便 LOST 状态下现场试值。
+    this->get_parameter<int>("sat_min", sat_min);
+    this->get_parameter<int>("val_min", val_min);
+    int smin = std::max(0, std::min(255, sat_min));
+    int vmin = std::max(0, std::min(255, val_min));
+
     cv::Mat hsv, mask, backproj;
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
-    cv::inRange(hsv, cv::Scalar(0, 30, 30), cv::Scalar(180, 255, 255), mask);
+    cv::inRange(hsv, cv::Scalar(0, smin, vmin), cv::Scalar(180, 255, 255), mask);
     float hrange[] = {0, 180};
     const float *ranges = hrange;
     int channels = 0;

@@ -79,6 +79,12 @@ public:
     this->declare_parameter<double>("recover_threshold", 0.30);  // 重检测得分高于此值即认为重新发现目标
     this->declare_parameter<int>("lost_patience", 8);            // 连续多少帧低置信度后判定 LOST
     this->declare_parameter<bool>("enable_redetect", true);
+    // 重检测外观模型（HSV 色调直方图）的可调参数。
+    // 对不同相机 / 光照需要现场微调，无需重编译，
+    // 可以用 `ros2 param set /image_converter sat_min 40` 实时改。
+    this->declare_parameter<int>("hue_bins", 32);   // 直方图 bin 数
+    this->declare_parameter<int>("sat_min", 30);    // S 通道下限，过滤过白 / 灰像素
+    this->declare_parameter<int>("val_min", 30);    // V 通道下限，过滤过暗像素
     // 与 collision_detector 的联动：
     // 收到 collision_topic 上的 Bool=true 脉冲时，
     // 在 collision_pause_sec 秒内冻结 /cmd_vel。
@@ -112,6 +118,9 @@ public:
         this->get_parameter<double>("recover_threshold", recover_threshold);
         this->get_parameter<int>("lost_patience", lost_patience);
         this->get_parameter<bool>("enable_redetect", enable_redetect);
+        this->get_parameter<int>("hue_bins", hue_bins);
+        this->get_parameter<int>("sat_min", sat_min);
+        this->get_parameter<int>("val_min", val_min);
         this->get_parameter<double>("collision_pause_sec", collision_pause_sec);
 
         std::string collision_topic;
@@ -155,6 +164,9 @@ public:
     cv::Mat target_hist;          // 首次框选目标时计算的 HSV 色调直方图
     cv::Size target_size;         // 记住原始 ROI 尺寸，重检测后重新初始化用
     bool has_target_model = false;
+    int hue_bins = 32;            // 直方图 bin 数（外观模型可调参数）
+    int sat_min = 30;             // S 通道下限
+    int val_min = 30;             // V 通道下限
 
     // 碰撞暂停：只要 now() < collision_pause_until_，
     // 无论跟踪处于什么状态，都强制把 /cmd_vel 压成零。

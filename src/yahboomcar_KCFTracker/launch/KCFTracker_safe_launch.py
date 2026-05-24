@@ -41,6 +41,13 @@ def generate_launch_description():
             description='反向投影平均响应高于此值即认为目标重新出现。'),
         DeclareLaunchArgument('enable_redetect', default_value='true',
             description='关掉后退化为原始开环 KCF。'),
+        # 重检测外观模型（HSV 色调直方图）的可调参数
+        DeclareLaunchArgument('hue_bins', default_value='32',
+            description='HSV 色调直方图 bin 数。'),
+        DeclareLaunchArgument('sat_min', default_value='30',
+            description='S 通道下限，过滤过白 / 灰像素。'),
+        DeclareLaunchArgument('val_min', default_value='30',
+            description='V 通道下限，过滤过暗像素。'),
         DeclareLaunchArgument('collision_pause_sec', default_value='2.0',
             description='每次收到碰撞脉冲后，冻结 /cmd_vel 的秒数。'),
 
@@ -65,6 +72,9 @@ def generate_launch_description():
             'lost_patience':       LaunchConfiguration('lost_patience'),
             'recover_threshold':   LaunchConfiguration('recover_threshold'),
             'enable_redetect':     LaunchConfiguration('enable_redetect'),
+            'hue_bins':            LaunchConfiguration('hue_bins'),
+            'sat_min':             LaunchConfiguration('sat_min'),
+            'val_min':             LaunchConfiguration('val_min'),
             'collision_topic':     COLLISION_FLAG_TOPIC,
             'collision_pause_sec': LaunchConfiguration('collision_pause_sec'),
         }],
