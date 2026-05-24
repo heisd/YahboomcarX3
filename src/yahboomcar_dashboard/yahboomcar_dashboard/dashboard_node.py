@@ -9,13 +9,16 @@ single-page web dashboard over an embedded HTTP server (Python stdlib,
 no Flask required).
 
 URL:  http://<robot-ip>:8088/
-API:  GET /api/state -> JSON snapshot (polled by the frontend at ~10 Hz)
+API:
+  GET  /api/state    -> JSON snapshot (polled by the frontend at ~10 Hz)
+  POST /api/cmd_vel  -> JSON {vx, vy, wz} -> published once on /cmd_vel
 """
 
 import json
 import math
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import rclpy
@@ -81,6 +84,9 @@ class SharedState:
             },
             # lidar quick stats
             'scan': {'count': 0, 'min': 0.0, 'max': 0.0},
+            # lidar points transformed into the odom frame (subsampled)
+            # list of [x, y] floats; cleared each scan
+            'scan_xy': [],
             # collision / joy flags
             'collision': None,
             'joy_state': None,
@@ -147,7 +153,44 @@ class DashboardNode(Node):
         self.create_subscription(Bool, 'collision', self._on_collision, 10)
         self.create_subscription(Bool, 'JoyState', self._on_joy, 10)
 
+        # publisher for web joystick -> /cmd_vel
+        self._cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self._cmd_lock = threading.Lock()
+        self._last_web_cmd_ts = 0.0
+        self._web_cmd_active = False
+        # watchdog: if a web command was the last to publish, stop the robot
+        # when the browser stops sending (network drop / tab closed).
+        self.create_timer(0.1, self._cmd_watchdog)
+
         self.get_logger().info('yahboomcar_dashboard node started.')
+
+    # --- web -> /cmd_vel --------------------------------------------------
+
+    def publish_web_cmd(self, vx: float, vy: float, wz: float):
+        """Called from the HTTP thread when the browser POSTs a command."""
+        msg = Twist()
+        msg.linear.x = float(vx)
+        msg.linear.y = float(vy)
+        msg.linear.z = 0.0
+        msg.angular.x = 0.0
+        msg.angular.y = 0.0
+        msg.angular.z = float(wz)
+        with self._cmd_lock:
+            self._cmd_pub.publish(msg)
+            self._last_web_cmd_ts = time.time()
+            self._web_cmd_active = (vx != 0.0 or vy != 0.0 or wz != 0.0)
+
+    def _cmd_watchdog(self):
+        # If we were actively driving from the web but stopped hearing
+        # heartbeats for >0.4 s, publish a single zero Twist as a safety.
+        with self._cmd_lock:
+            if not self._web_cmd_active:
+                return
+            if time.time() - self._last_web_cmd_ts > 0.4:
+                stop = Twist()
+                self._cmd_pub.publish(stop)
+                self._web_cmd_active = False
+                self.get_logger().warn('Web cmd_vel watchdog: stopped.')
 
     @staticmethod
     def _now():
@@ -209,14 +252,45 @@ class DashboardNode(Node):
         self.state.touch('imu', self._now())
 
     def _on_scan(self, msg: LaserScan):
-        ranges = [r for r in msg.ranges
-                  if not math.isnan(r) and not math.isinf(r) and r > 0.0]
-        if ranges:
+        # snapshot current robot pose to project scan into the odom frame
+        snap = self.state.snapshot(time.time())
+        rx = snap['odom']['x']
+        ry = snap['odom']['y']
+        ryaw = snap['odom']['yaw']
+        cos_y = math.cos(ryaw)
+        sin_y = math.sin(ryaw)
+
+        # subsample so the JSON stays small (~180 points)
+        n = len(msg.ranges)
+        step = max(1, n // 180)
+
+        ranges_clean = []
+        xy = []
+        for i in range(0, n, step):
+            r = msg.ranges[i]
+            if math.isnan(r) or math.isinf(r) or r <= 0.0:
+                continue
+            if msg.range_min and r < msg.range_min:
+                continue
+            if msg.range_max and r > msg.range_max:
+                continue
+            ranges_clean.append(r)
+            ang = msg.angle_min + i * msg.angle_increment
+            # point in robot frame
+            px = r * math.cos(ang)
+            py = r * math.sin(ang)
+            # transform into odom frame
+            wx = rx + cos_y * px - sin_y * py
+            wy = ry + sin_y * px + cos_y * py
+            xy.append([round(wx, 3), round(wy, 3)])
+
+        if ranges_clean:
             self.state.set('scan', {
-                'count': len(ranges),
-                'min': round(min(ranges), 3),
-                'max': round(max(ranges), 3),
+                'count': len(ranges_clean),
+                'min': round(min(ranges_clean), 3),
+                'max': round(max(ranges_clean), 3),
             })
+        self.state.set('scan_xy', xy)
         self.state.touch('lidar', self._now())
 
     def _on_collision(self, msg: Bool):
@@ -229,7 +303,7 @@ class DashboardNode(Node):
 
 # -------- HTTP server ------------------------------------------------------
 
-def make_handler(state: SharedState, web_dir: str):
+def make_handler(state: SharedState, web_dir: str, node: 'DashboardNode'):
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # silence default access log
@@ -244,7 +318,6 @@ def make_handler(state: SharedState, web_dir: str):
             self.wfile.write(body)
 
         def do_GET(self):
-            import time
             path = self.path.split('?', 1)[0]
             if path in ('/', '/index.html'):
                 self._serve_file(os.path.join(web_dir, 'index.html'),
@@ -261,6 +334,28 @@ def make_handler(state: SharedState, web_dir: str):
                                  self._guess_type(rel))
                 return
             self._send(404, b'not found', 'text/plain')
+
+        def do_POST(self):
+            path = self.path.split('?', 1)[0]
+            if path != '/api/cmd_vel':
+                self._send(404, b'not found', 'text/plain')
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                body = self.rfile.read(length) if length > 0 else b'{}'
+                data = json.loads(body.decode('utf-8'))
+                vx = float(data.get('vx', 0.0))
+                vy = float(data.get('vy', 0.0))
+                wz = float(data.get('wz', 0.0))
+                # hard server-side clamps as a final safety net
+                vx = max(-1.0, min(1.0, vx))
+                vy = max(-1.0, min(1.0, vy))
+                wz = max(-3.0, min(3.0, wz))
+                node.publish_web_cmd(vx, vy, wz)
+                self._send(200, b'{"ok":true}', 'application/json')
+            except Exception as e:
+                self._send(400, json.dumps({'ok': False, 'error': str(e)})
+                           .encode('utf-8'), 'application/json')
 
         def _serve_file(self, fpath, ctype):
             try:
@@ -315,7 +410,7 @@ def main(args=None):
     port = node.get_parameter('port').get_parameter_value().integer_value
 
     web_dir = find_web_dir()
-    handler_cls = make_handler(state, web_dir)
+    handler_cls = make_handler(state, web_dir, node)
     httpd = ThreadingHTTPServer((host, port), handler_cls)
 
     server_thread = threading.Thread(

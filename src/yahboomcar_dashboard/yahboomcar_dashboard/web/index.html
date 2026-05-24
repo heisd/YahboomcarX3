@@ -131,6 +131,99 @@
     color: var(--muted); font-size: 12px;
   }
   canvas { display: block; width: 100%; height: 120px; }
+
+  /* --- joystick --- */
+  .joy-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: center;
+  }
+  .joy-pad {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 180px;
+    margin: 0 auto;
+    background: radial-gradient(circle, var(--panel-2) 60%, var(--panel) 100%);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+  }
+  .joy-pad.active { cursor: grabbing; border-color: var(--accent); }
+  .joy-knob {
+    position: absolute;
+    width: 36%;
+    height: 36%;
+    left: 32%;
+    top: 32%;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(88,166,255,0.5);
+    pointer-events: none;
+    transition: transform 0.05s linear;
+  }
+  .joy-label {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .joy-readout {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    margin-top: 4px;
+    color: var(--text);
+  }
+  .joy-controls {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .joy-controls label {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--muted); font-size: 12px;
+  }
+  .joy-controls input[type=range] { width: 100px; }
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.danger { background: rgba(248,81,73,0.15); border-color: var(--err); color: var(--err); }
+  .btn.danger:hover { background: rgba(248,81,73,0.25); }
+  .btn.primary { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
+
+  /* --- map card --- */
+  .card.map { grid-column: span 2; }
+  @media (max-width: 900px) { .card.map { grid-column: span 1; } }
+  .map-canvas {
+    width: 100%;
+    height: 480px;
+    background: #0b0f14;
+    border-radius: 6px;
+    display: block;
+    touch-action: none;
+  }
+  .map-toolbar {
+    display: flex; gap: 8px; align-items: center;
+    margin-bottom: 8px; flex-wrap: wrap;
+    color: var(--muted); font-size: 12px;
+  }
+  .map-toolbar .sep { flex: 1; }
 </style>
 </head>
 <body>
@@ -271,6 +364,61 @@
       <div class="k">最近距离</div><div class="v" id="scan-min">-- m</div>
       <div class="k">最远距离</div><div class="v" id="scan-max">-- m</div>
     </div>
+  </section>
+
+  <!-- 虚拟摇杆 -->
+  <section class="card">
+    <h2>虚拟摇杆 (/cmd_vel)</h2>
+    <div class="joy-wrap">
+      <div>
+        <div class="joy-pad" id="joy-linear">
+          <div class="joy-knob"></div>
+        </div>
+        <div class="joy-label">线速度 (vx / vy)</div>
+        <div class="joy-readout" id="joy-linear-readout">0.00, 0.00 m/s</div>
+      </div>
+      <div>
+        <div class="joy-pad" id="joy-angular">
+          <div class="joy-knob"></div>
+        </div>
+        <div class="joy-label">角速度 (ωz)</div>
+        <div class="joy-readout" id="joy-angular-readout">0.00 rad/s</div>
+      </div>
+      <div class="joy-controls">
+        <label>vmax
+          <input type="range" id="vmax" min="0.1" max="1.0" step="0.05" value="0.4" />
+          <span id="vmax-val">0.40</span>
+        </label>
+        <label>ωmax
+          <input type="range" id="wmax" min="0.2" max="3.0" step="0.1" value="1.5" />
+          <span id="wmax-val">1.50</span>
+        </label>
+        <span class="sep" style="flex:1"></span>
+        <button class="btn danger" id="stop-btn">急停</button>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin:10px 0 0 0;line-height:1.5">
+      支持鼠标和触屏拖动；松开自动归零。<br/>
+      安全：浏览器每 50&nbsp;ms 发送一次心跳，若 400&nbsp;ms 无心跳节点会强制停车。
+    </p>
+  </section>
+
+  <!-- 2D 地图 -->
+  <section class="card map">
+    <h2>2D 地图 (odom + scan)</h2>
+    <div class="map-toolbar">
+      <button class="btn" id="map-zoom-out">−</button>
+      <span id="map-zoom-val">60 px/m</span>
+      <button class="btn" id="map-zoom-in">+</button>
+      <button class="btn" id="map-center">居中</button>
+      <button class="btn" id="map-clear">清空轨迹</button>
+      <label style="margin-left:8px">
+        <input type="checkbox" id="map-follow" checked /> 跟随机器人
+      </label>
+      <span class="sep"></span>
+      <span>轨迹点 <span id="map-traj-count">0</span></span>
+    </div>
+    <canvas id="map" class="map-canvas" width="900" height="480"></canvas>
   </section>
 </main>
 
@@ -454,6 +602,337 @@ async function poll() {
 
 setInterval(poll, 100);  // 10 Hz
 poll();
+
+// =============================================================
+// Virtual joystick -> POST /api/cmd_vel
+// =============================================================
+const joyState = {
+  linear:  { active: false, nx: 0, ny: 0 },  // normalized -1..1
+  angular: { active: false, nx: 0, ny: 0 },
+};
+let vmax = 0.4, wmax = 1.5;
+
+function bindJoystick(padId, key) {
+  const pad = document.getElementById(padId);
+  const knob = pad.querySelector('.joy-knob');
+
+  function setKnob(nx, ny) {
+    // nx,ny in [-1,1], map to half-width offset
+    const tx = nx * 50; // % of pad width relative to its center
+    const ty = ny * 50;
+    knob.style.transform = `translate(${tx}%, ${ty}%)`;
+  }
+  function update(e, active) {
+    const rect = pad.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const point = (e.touches && e.touches[0]) || e;
+    let dx = (point.clientX - cx) / (rect.width / 2);
+    let dy = (point.clientY - cy) / (rect.height / 2);
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    if (key === 'angular') dy = 0; // angular pad: horizontal only
+    joyState[key].nx = dx;
+    joyState[key].ny = dy;
+    joyState[key].active = active;
+    setKnob(dx, dy);
+    pad.classList.toggle('active', active);
+  }
+  function release() {
+    joyState[key].nx = 0;
+    joyState[key].ny = 0;
+    joyState[key].active = false;
+    setKnob(0, 0);
+    pad.classList.remove('active');
+    sendCmdVel(true);  // send one immediate zero
+  }
+
+  pad.addEventListener('mousedown', (e) => { e.preventDefault(); update(e, true); });
+  window.addEventListener('mousemove', (e) => {
+    if (joyState[key].active) update(e, true);
+  });
+  window.addEventListener('mouseup', () => {
+    if (joyState[key].active) release();
+  });
+  pad.addEventListener('touchstart', (e) => { e.preventDefault(); update(e, true); }, { passive: false });
+  pad.addEventListener('touchmove',  (e) => { e.preventDefault(); update(e, true); }, { passive: false });
+  pad.addEventListener('touchend',   () => release());
+  pad.addEventListener('touchcancel',() => release());
+}
+bindJoystick('joy-linear',  'linear');
+bindJoystick('joy-angular', 'angular');
+
+document.getElementById('vmax').addEventListener('input', (e) => {
+  vmax = parseFloat(e.target.value);
+  document.getElementById('vmax-val').textContent = vmax.toFixed(2);
+});
+document.getElementById('wmax').addEventListener('input', (e) => {
+  wmax = parseFloat(e.target.value);
+  document.getElementById('wmax-val').textContent = wmax.toFixed(2);
+});
+document.getElementById('stop-btn').addEventListener('click', () => {
+  joyState.linear.nx = joyState.linear.ny = 0;
+  joyState.angular.nx = joyState.angular.ny = 0;
+  joyState.linear.active = joyState.angular.active = false;
+  document.querySelectorAll('.joy-knob').forEach(k => k.style.transform = 'translate(0,0)');
+  document.querySelectorAll('.joy-pad').forEach(p => p.classList.remove('active'));
+  sendCmdVel(true);
+});
+
+async function sendCmdVel(force=false) {
+  const ln = joyState.linear, ag = joyState.angular;
+  const active = ln.active || ag.active;
+  if (!active && !force) return;
+  // mecanum convention: nx (left/right) -> vy, ny (up/down) -> vx (inverted)
+  const vx = -ln.ny * vmax;
+  const vy = -ln.nx * vmax;
+  const wz = -ag.nx * wmax;
+  try {
+    await fetch('/api/cmd_vel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vx, vy, wz }),
+    });
+  } catch (_) { /* ignore; watchdog handles */ }
+  document.getElementById('joy-linear-readout').textContent =
+    `${vx.toFixed(2)}, ${vy.toFixed(2)} m/s`;
+  document.getElementById('joy-angular-readout').textContent =
+    `${wz.toFixed(2)} rad/s`;
+}
+setInterval(() => sendCmdVel(false), 50);  // 20 Hz heartbeat while active
+
+// =============================================================
+// 2D map view: odom trajectory + laser scan, robot-centered
+// =============================================================
+const mapCanvas = document.getElementById('map');
+const mapCtx = mapCanvas.getContext('2d');
+const mapState = {
+  scale: 60,          // pixels per meter
+  offsetX: 0,         // world->canvas translate (px) when not following
+  offsetY: 0,
+  follow: true,
+  trajectory: [],     // [[x,y], ...] in odom frame
+  lastTrajPoint: null,
+  scanXY: [],         // [[x,y], ...] in odom frame, latest scan
+  robot: { x: 0, y: 0, yaw: 0, valid: false },
+  panning: false, panStart: null, panOffsetStart: null,
+};
+
+function resizeMap() {
+  const r = mapCanvas.getBoundingClientRect();
+  mapCanvas.width = Math.floor(r.width);
+  mapCanvas.height = Math.floor(r.height);
+}
+window.addEventListener('resize', resizeMap);
+resizeMap();
+
+function worldToCanvas(wx, wy) {
+  const cx = mapCanvas.width / 2;
+  const cy = mapCanvas.height / 2;
+  if (mapState.follow && mapState.robot.valid) {
+    return [
+      cx + (wx - mapState.robot.x) * mapState.scale,
+      cy - (wy - mapState.robot.y) * mapState.scale,
+    ];
+  }
+  return [
+    cx + wx * mapState.scale + mapState.offsetX,
+    cy - wy * mapState.scale + mapState.offsetY,
+  ];
+}
+
+function drawGrid() {
+  const ctx = mapCtx;
+  const W = mapCanvas.width, H = mapCanvas.height;
+  ctx.fillStyle = '#0b0f14';
+  ctx.fillRect(0, 0, W, H);
+
+  // grid lines every 1 meter, plus a fainter half-meter
+  ctx.lineWidth = 1;
+  const stepMinor = mapState.scale * 0.5;
+  const stepMajor = mapState.scale * 1.0;
+
+  // anchor grid to world origin
+  const [ox, oy] = worldToCanvas(0, 0);
+
+  function vlines(step, color) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    const startX = ox - Math.floor(ox / step) * step;
+    for (let x = startX % step; x < W; x += step) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+  }
+  function hlines(step, color) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    const startY = oy - Math.floor(oy / step) * step;
+    for (let y = startY % step; y < H; y += step) {
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+  }
+  if (stepMinor >= 8) {
+    vlines(stepMinor, '#161d27');
+    hlines(stepMinor, '#161d27');
+  }
+  if (stepMajor >= 12) {
+    vlines(stepMajor, '#202b3a');
+    hlines(stepMajor, '#202b3a');
+  }
+  // world axes through origin
+  ctx.strokeStyle = '#2e3947';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(ox, 0); ctx.lineTo(ox, H);
+  ctx.moveTo(0, oy); ctx.lineTo(W, oy);
+  ctx.stroke();
+  // origin label
+  ctx.fillStyle = '#8b98a5';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('odom (0,0)', ox + 4, oy - 4);
+}
+
+function drawScan() {
+  if (!mapState.scanXY.length) return;
+  const ctx = mapCtx;
+  ctx.fillStyle = 'rgba(248,81,73,0.85)';
+  for (const [x, y] of mapState.scanXY) {
+    const [px, py] = worldToCanvas(x, y);
+    ctx.fillRect(px - 1, py - 1, 2, 2);
+  }
+}
+
+function drawTrajectory() {
+  const t = mapState.trajectory;
+  if (t.length < 2) return;
+  const ctx = mapCtx;
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < t.length; i++) {
+    const [px, py] = worldToCanvas(t[i][0], t[i][1]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+function drawRobot() {
+  if (!mapState.robot.valid) return;
+  const ctx = mapCtx;
+  const [px, py] = worldToCanvas(mapState.robot.x, mapState.robot.y);
+  const size = Math.max(10, mapState.scale * 0.18);
+  ctx.save();
+  ctx.translate(px, py);
+  // canvas Y is inverted vs world Y; rotate by -yaw to align
+  ctx.rotate(-mapState.robot.yaw);
+  // triangle pointing +X (forward)
+  ctx.beginPath();
+  ctx.moveTo(size, 0);
+  ctx.lineTo(-size * 0.7,  size * 0.6);
+  ctx.lineTo(-size * 0.7, -size * 0.6);
+  ctx.closePath();
+  ctx.fillStyle = '#3fb950';
+  ctx.fill();
+  ctx.strokeStyle = '#e6edf3';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawScaleBar() {
+  const ctx = mapCtx;
+  const px = mapState.scale;  // pixels per meter
+  const y = mapCanvas.height - 16;
+  ctx.strokeStyle = '#e6edf3';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(12, y); ctx.lineTo(12 + px, y);
+  ctx.moveTo(12, y - 4); ctx.lineTo(12, y + 4);
+  ctx.moveTo(12 + px, y - 4); ctx.lineTo(12 + px, y + 4);
+  ctx.stroke();
+  ctx.fillStyle = '#8b98a5';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('1 m', 16 + px, y - 4);
+}
+
+function renderMap() {
+  drawGrid();
+  drawScan();
+  drawTrajectory();
+  drawRobot();
+  drawScaleBar();
+}
+setInterval(renderMap, 100);
+
+// hook into poll() output: extend the existing poll to capture map data
+const _origPoll = poll;
+window.poll = async function() {
+  await _origPoll();
+};
+// instead of monkey-patching, just observe the DOM-updated state from the
+// previous poll cycle via the same fetch. Easier: do our own light fetch
+// pass that only consumes map-relevant fields.
+async function mapTick() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    if (!r.ok) return;
+    const s = await r.json();
+    const o = s.odom;
+    mapState.robot = { x: o.x, y: o.y, yaw: o.yaw, valid: true };
+    mapState.scanXY = s.scan_xy || [];
+    // append trajectory only when moved >2cm to keep buffer small
+    const last = mapState.lastTrajPoint;
+    if (!last || Math.hypot(o.x - last[0], o.y - last[1]) > 0.02) {
+      mapState.trajectory.push([o.x, o.y]);
+      mapState.lastTrajPoint = [o.x, o.y];
+      if (mapState.trajectory.length > 2000) mapState.trajectory.shift();
+    }
+    document.getElementById('map-traj-count').textContent = mapState.trajectory.length;
+  } catch (_) { /* network blip; ignored */ }
+}
+setInterval(mapTick, 150);  // ~6-7 Hz is plenty for the map
+
+// map controls
+document.getElementById('map-zoom-in').addEventListener('click', () => {
+  mapState.scale = Math.min(400, mapState.scale * 1.25);
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+});
+document.getElementById('map-zoom-out').addEventListener('click', () => {
+  mapState.scale = Math.max(10, mapState.scale / 1.25);
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+});
+document.getElementById('map-center').addEventListener('click', () => {
+  mapState.offsetX = 0; mapState.offsetY = 0;
+});
+document.getElementById('map-clear').addEventListener('click', () => {
+  mapState.trajectory = [];
+  mapState.lastTrajPoint = null;
+});
+document.getElementById('map-follow').addEventListener('change', (e) => {
+  mapState.follow = e.target.checked;
+});
+
+// click+drag to pan when not following
+mapCanvas.addEventListener('mousedown', (e) => {
+  if (mapState.follow) return;
+  mapState.panning = true;
+  mapState.panStart = [e.clientX, e.clientY];
+  mapState.panOffsetStart = [mapState.offsetX, mapState.offsetY];
+});
+window.addEventListener('mousemove', (e) => {
+  if (!mapState.panning) return;
+  mapState.offsetX = mapState.panOffsetStart[0] + (e.clientX - mapState.panStart[0]);
+  mapState.offsetY = mapState.panOffsetStart[1] + (e.clientY - mapState.panStart[1]);
+});
+window.addEventListener('mouseup', () => { mapState.panning = false; });
+mapCanvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
+  mapState.scale = Math.max(10, Math.min(400, mapState.scale * factor));
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+}, { passive: false });
 </script>
 </body>
 </html>
