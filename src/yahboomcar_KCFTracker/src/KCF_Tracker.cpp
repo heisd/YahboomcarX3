@@ -210,7 +210,17 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
         setState(TrackState::TRACKING, "用户框选目标完成");
     }
     if (bBeginKCF) {
-        if (track_state == TrackState::LOST && enable_redetect) {
+        const bool searching = enable_redetect &&
+            (track_state == TrackState::LOST ||
+             track_state == TrackState::RECOVERING);
+        if (searching) {
+            // LOST 只是"刚确认丢失"的瞬态；一旦准备开始搜索，
+            // 立刻升级到 RECOVERING，告诉 /KCF_status 的订阅者
+            // 当前正在主动找回目标。setState 是边沿触发，
+            // 在 RECOVERING 期间不会重复打日志。
+            if (track_state == TrackState::LOST) {
+                setState(TrackState::RECOVERING, "开始全图重检测");
+            }
             cv::Rect recovered;
             if (redetect(rgbimage, recovered)) {
                 tracker.init(recovered, rgbimage);
@@ -223,12 +233,11 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
                          recovered.width, recovered.height);
                 setState(TrackState::TRACKING, reason);
             } else {
-                // 还没找回目标，先停车继续搜索。
+                // 还没找回目标，先停车继续搜索，保持 RECOVERING。
                 vel_pub_->publish(geometry_msgs::msg::Twist());
                 rectangle(rgbimage, result, Scalar(0, 0, 255), 2, 8);
-                putText(rgbimage, "LOST - searching", Point(10, 30),
+                putText(rgbimage, "RECOVERING - searching", Point(10, 30),
                         FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 255), 2);
-                // setState 是边沿触发：已是 LOST 就不会再打印日志，避免刷屏。
             }
         } else {
             float peak = 0.0f;

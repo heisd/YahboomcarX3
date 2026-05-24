@@ -48,8 +48,12 @@ KCF 本身是开环短时跟踪器，目标被遮挡 / 出视野后会跟丢且�
 
 1. **置信度监测**：每帧从 `KCFTracker::update()` 读取响应峰值 `peak_value`，发布到 `/KCF_confidence`。
 2. **丢失判定**：当 `peak_value < lost_threshold` 连续 `lost_patience` 帧时，状态机进入 `LOST`，立刻发布零 `Twist` 停车。
-3. **重检测**：首次选定目标时构建 HSV 色调直方图作为外观模板；进入 `LOST` 后每帧在全图做反向投影 + CamShift 搜索；得分超过 `recover_threshold` 即视为重新发现。
-4. **闭环回归**：用重检测得到的 ROI 重新初始化 KCF，状态回到 `TRACKING`，PID 跟随重新启用。
+3. **进入恢复**：下一帧立即由 `LOST` 升级到 `RECOVERING`，向 `/KCF_status` 订阅者明确表示"正在主动搜索"。
+4. **重检测**：首次选定目标时构建 HSV 色调直方图作为外观模板；`RECOVERING` 期间每帧在全图做反向投影 + CamShift 搜索；得分超过 `recover_threshold` 即视为重新发现。
+5. **闭环回归**：用重检测得到的 ROI 重新初始化 KCF，状态回到 `TRACKING`，PID 跟随重新启用。
+
+状态机：`IDLE → TRACKING → LOST → RECOVERING → TRACKING`（任意状态可被 Reset 回 `IDLE`）。
+关掉 `enable_redetect` 时状态停在 `LOST`，不进入 `RECOVERING`，等待人工 Reset。
 
 ### 话题
 

@@ -31,10 +31,17 @@ using namespace cv;
 using std::placeholders::_1;
 
 // 闭环跟踪状态机：
+//   IDLE       - 还没框选目标 / 已 Reset；
 //   TRACKING   - KCF 响应正常，正常跟随；
-//   LOST       - 响应连续低于阈值，判定丢失，立即停车；
-//   RECOVERING - 用颜色直方图反向投影做全图重检测；
-//   IDLE       - 还没框选目标 / 已 Reset。
+//   LOST       - 响应连续低于阈值刚刚确认丢失（瞬态，立即停车）；
+//   RECOVERING - 正在用颜色直方图反向投影做全图重检测，找到即回 TRACKING。
+// 转换：
+//   IDLE       -> TRACKING                 用户框选完成
+//   TRACKING   -> LOST                     连续 lost_patience 帧低置信度
+//   LOST       -> RECOVERING               下一帧开始主动重检测（需 enable_redetect）
+//   RECOVERING -> TRACKING                 重检测得分超过 recover_threshold
+//   任意状态   -> IDLE                     调用 Reset()
+// 若 enable_redetect=false，状态会停在 LOST 不进 RECOVERING。
 enum class TrackState { IDLE, TRACKING, LOST, RECOVERING };
 
 class ImageConverter :public rclcpp::Node{
