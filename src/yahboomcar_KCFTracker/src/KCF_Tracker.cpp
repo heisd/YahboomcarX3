@@ -290,6 +290,11 @@ void ImageConverter::depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
     catch (cv_bridge::Exception &e) {
         std::cout<<"Could not convert from  to 'TYPE_32FC1'."<<std::endl;
     }
+    if (inCollisionPause()) {
+        vel_pub_->publish(geometry_msgs::msg::Twist());
+        waitKey(1);
+        return;
+    }
     if (enable_get_depth && track_state == TrackState::TRACKING) {
         int center_x = (int)(result.x + result.width / 2);
         std::cout<<"center_x: "<<center_x<<std::endl;
@@ -336,6 +341,31 @@ void ImageConverter::depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
 
 void ImageConverter::JoyCb(const std::shared_ptr<std_msgs::msg::Bool> msg) {
     enable_get_depth = msg->data;
+}
+
+// Hold-off gate driven by the collision_detector node. We don't change the
+// tracking state machine here -- KCF can keep tracking the target visually --
+// we just freeze /cmd_vel for collision_pause_sec so the car can settle after
+// an impact. Edge-triggered logs make pause begin/end easy to spot.
+void ImageConverter::CollisionCb(const std::shared_ptr<std_msgs::msg::Bool> msg) {
+    if (!msg->data) return;
+    auto now = this->get_clock()->now();
+    auto until = now + rclcpp::Duration::from_seconds(collision_pause_sec);
+    collision_pause_until_ = until;
+    vel_pub_->publish(geometry_msgs::msg::Twist());  // immediate stop
+    RCLCPP_WARN(this->get_logger(),
+                "[KCF] collision pulse received -> pause cmd_vel for %.2fs",
+                collision_pause_sec);
+    was_paused_ = true;
+}
+
+bool ImageConverter::inCollisionPause() {
+    bool paused = this->get_clock()->now() < collision_pause_until_;
+    if (!paused && was_paused_) {
+        RCLCPP_INFO(this->get_logger(), "[KCF] collision pause released, resuming follow");
+        was_paused_ = false;
+    }
+    return paused;
 }
 
 

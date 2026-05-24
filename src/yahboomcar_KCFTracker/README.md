@@ -64,10 +64,33 @@ KCF 本身是开环短时跟踪器，目标被遮挡 / 出视野后会跟丢且�
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
+| `minDist_` | `1.0` | **PID 跟随距离**（米）。容差 ±0.1m。 |
 | `lost_threshold` | `0.15` | 峰值低于此值视为低置信度帧 |
 | `lost_patience` | `8` | 连续多少低置信度帧后判定丢失 |
 | `recover_threshold` | `0.30` | 反向投影平均响应阈值，超过则恢复 |
 | `enable_redetect` | `true` | 关掉后退化为原始开环 KCF |
+| `collision_topic` | `/collision_detector/collision` | 碰撞 Bool 脉冲来源 |
+| `collision_pause_sec` | `2.0` | 收到碰撞脉冲后冻结 `/cmd_vel` 的秒数 |
+
+## 与 collision_detector 联动 (glue launch)
+
+`launch/KCFTracker_safe_launch.py` 仿 `yahboomcar_linefollow/linefollow_safe_launch.py`：
+
+- 同时拉起 `KCF_Tracker_Node` 和 `collision_detector`。
+- detector 用 `stop_on_collision:=false`，**只**发布 `/collision_detector/collision`（`std_msgs/Bool` 脉冲），不抢 `/cmd_vel`。
+- KCF 节点订阅这个话题，收到 True 后：
+  1. 立刻发一帧零 `Twist` 急停；
+  2. 把 `collision_pause_until_` 推迟 `collision_pause_sec` 秒；
+  3. `depthCb` 在暂停窗口内一律发零 `Twist`，PID 不输出；
+  4. 暂停结束打印 `collision pause released, resuming follow`。
+- 暂停**不会**改变 KCF 跟踪状态（仍然在跟），只是冻结底盘运动，等冲击平息后继续跟随。
+
+运行：
+
+```bash
+ros2 launch yahboomcar_KCFTracker KCFTracker_safe_launch.py \
+    minDist:=0.8 collision_pause_sec:=3.0 accel_threshold:=10.0
+```
 
 ### 运行环境
 

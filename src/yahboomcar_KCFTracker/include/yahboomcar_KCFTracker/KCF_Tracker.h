@@ -43,6 +43,7 @@ class ImageConverter :public rclcpp::Node{
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr Joy_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr collision_sub_;
 
 public:
     ImageConverter():Node("image_converter")
@@ -69,6 +70,10 @@ public:
     this->declare_parameter<double>("recover_threshold", 0.30);  // re-init when redetector score above this
     this->declare_parameter<int>("lost_patience", 8);            // consecutive low-confidence frames before LOST
     this->declare_parameter<bool>("enable_redetect", true);
+    // Collision-pause glue: when a Bool=true pulse arrives on
+    // `collision_topic`, suppress /cmd_vel for `collision_pause_sec` seconds.
+    this->declare_parameter<std::string>("collision_topic", "/collision_detector/collision");
+    this->declare_parameter<double>("collision_pause_sec", 2.0);
 
         
     this->get_parameter<float>("linear_KP_",linear_KP);
@@ -97,6 +102,14 @@ public:
         this->get_parameter<double>("recover_threshold", recover_threshold);
         this->get_parameter<int>("lost_patience", lost_patience);
         this->get_parameter<bool>("enable_redetect", enable_redetect);
+        this->get_parameter<double>("collision_pause_sec", collision_pause_sec);
+
+        std::string collision_topic;
+        this->get_parameter<std::string>("collision_topic", collision_topic);
+        collision_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            collision_topic, 10,
+            std::bind(&ImageConverter::CollisionCb, this, _1));
+        collision_pause_until_ = this->get_clock()->now();
     }
     //ros::Publisher pub;
     PID *linear_PID;
@@ -133,6 +146,12 @@ public:
     cv::Size target_size;         // remembered ROI size for re-init
     bool has_target_model = false;
 
+    // Collision pause: while now() < collision_pause_until_, /cmd_vel is held
+    // at zero regardless of tracking state.
+    rclcpp::Time collision_pause_until_;
+    double collision_pause_sec = 2.0;
+    bool was_paused_ = false;
+
     void buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi);
     bool redetect(const cv::Mat &bgr, cv::Rect &found);
     void publishConfidence(float v);
@@ -162,7 +181,11 @@ public:
     void depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg) ;
 
     void JoyCb(const std::shared_ptr<std_msgs::msg::Bool> msg) ;
-    
+
+    void CollisionCb(const std::shared_ptr<std_msgs::msg::Bool> msg) ;
+
+    bool inCollisionPause();
+
     void StopCarb() ;
 
     //void depthCb(const sensor_msgs::ImageConstPtr &msg);
