@@ -17,7 +17,6 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
-  <depend>image_transport</depend>
   <depend>libopencv-dev</depend>
 
   <!-- KCFTracker_safe_launch.py 联合启动 collision_detector，

@@ -60,7 +60,7 @@ KCF 本身是开环短时跟踪器，目标被遮挡 / 出视野后会跟丢且�
 | 方向 | 话题 | 类型 | 说明 |
 | --- | --- | --- | --- |
 | Pub | `/KCF_image` | `sensor_msgs/Image` | 叠加框 / 状态文字的可视化图 |
-| Pub | `/KCF_status` | `std_msgs/String` | `IDLE` / `TRACKING` / `LOST` / `RECOVERED` |
+| Pub | `/KCF_status` | `std_msgs/String` | `IDLE` / `TRACKING` / `LOST` / `RECOVERING` |
 | Pub | `/KCF_confidence` | `std_msgs/Float32` | 实时响应峰值 |
 | Pub | `/cmd_vel` | `geometry_msgs/Twist` | PID 输出（LOST 时为 0） |
 
