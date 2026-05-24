@@ -30,9 +30,11 @@ using namespace std;
 using namespace cv;
 using std::placeholders::_1;
 
-// Closed-loop tracking state: TRACKING when KCF response is healthy, LOST when
-// confidence drops below threshold for too long, RECOVERING while we try to
-// re-acquire the target by colour-histogram back-projection.
+// 闭环跟踪状态机：
+//   TRACKING   - KCF 响应正常，正常跟随；
+//   LOST       - 响应连续低于阈值，判定丢失，立即停车；
+//   RECOVERING - 用颜色直方图反向投影做全图重检测；
+//   IDLE       - 还没框选目标 / 已 Reset。
 enum class TrackState { IDLE, TRACKING, LOST, RECOVERING };
 
 class ImageConverter :public rclcpp::Node{
@@ -65,13 +67,14 @@ public:
     this->declare_parameter<float>("angular_KD_",2.0);
     this->declare_parameter<float>("minDist_",1.0);
     this->declare_parameter<bool>("refresh_",false);
-    // Closed-loop re-detection parameters
-    this->declare_parameter<double>("lost_threshold", 0.15);     // peak below this for N frames -> LOST
-    this->declare_parameter<double>("recover_threshold", 0.30);  // re-init when redetector score above this
-    this->declare_parameter<int>("lost_patience", 8);            // consecutive low-confidence frames before LOST
+    // 闭环重检测相关参数
+    this->declare_parameter<double>("lost_threshold", 0.15);     // 峰值低于此值视为低置信度帧
+    this->declare_parameter<double>("recover_threshold", 0.30);  // 重检测得分高于此值即认为重新发现目标
+    this->declare_parameter<int>("lost_patience", 8);            // 连续多少帧低置信度后判定 LOST
     this->declare_parameter<bool>("enable_redetect", true);
-    // Collision-pause glue: when a Bool=true pulse arrives on
-    // `collision_topic`, suppress /cmd_vel for `collision_pause_sec` seconds.
+    // 与 collision_detector 的联动：
+    // 收到 collision_topic 上的 Bool=true 脉冲时，
+    // 在 collision_pause_sec 秒内冻结 /cmd_vel。
     this->declare_parameter<std::string>("collision_topic", "/collision_detector/collision");
     this->declare_parameter<double>("collision_pause_sec", 2.0);
 
@@ -134,7 +137,7 @@ public:
     int center_x;
     KCFTracker tracker;
 
-    // Closed-loop re-detection state
+    // 闭环重检测的运行时状态
     TrackState track_state = TrackState::IDLE;
     double lost_threshold = 0.15;
     double recover_threshold = 0.30;
@@ -142,12 +145,12 @@ public:
     bool enable_redetect = true;
     int low_conf_count = 0;
     float last_peak_value = 0.0f;
-    cv::Mat target_hist;          // HSV hue histogram of the originally selected target
-    cv::Size target_size;         // remembered ROI size for re-init
+    cv::Mat target_hist;          // 首次框选目标时计算的 HSV 色调直方图
+    cv::Size target_size;         // 记住原始 ROI 尺寸，重检测后重新初始化用
     bool has_target_model = false;
 
-    // Collision pause: while now() < collision_pause_until_, /cmd_vel is held
-    // at zero regardless of tracking state.
+    // 碰撞暂停：只要 now() < collision_pause_until_，
+    // 无论跟踪处于什么状态，都强制把 /cmd_vel 压成零。
     rclcpp::Time collision_pause_until_;
     double collision_pause_sec = 2.0;
     bool was_paused_ = false;
@@ -156,8 +159,8 @@ public:
     bool redetect(const cv::Mat &bgr, cv::Rect &found);
     void publishConfidence(float v);
 
-    // Edge-triggered state transition: only fires (logs + publishes /KCF_status)
-    // when new_state differs from the current track_state.
+    // 边沿触发的状态切换：仅在 new_state 与 track_state 不同时
+    // 才打印日志并向 /KCF_status 发布一次。
     void setState(TrackState new_state, const std::string &reason = "");
     static const char *stateName(TrackState s);
     void onStateChanged(TrackState from, TrackState to, const std::string &reason);

@@ -61,7 +61,7 @@ void ImageConverter::Reset() {
     last_peak_value = 0.0f;
     has_target_model = false;
     target_hist.release();
-    setState(TrackState::IDLE, "reset");
+    setState(TrackState::IDLE, "节点 Reset");
 }
 
 const char *ImageConverter::stateName(TrackState s) {
@@ -78,9 +78,9 @@ void ImageConverter::onStateChanged(TrackState from, TrackState to, const std::s
     const char *from_s = stateName(from);
     const char *to_s = stateName(to);
     if (reason.empty()) {
-        RCLCPP_INFO(this->get_logger(), "[KCF] state %s -> %s", from_s, to_s);
+        RCLCPP_INFO(this->get_logger(), "[KCF] 状态切换 %s -> %s", from_s, to_s);
     } else {
-        RCLCPP_INFO(this->get_logger(), "[KCF] state %s -> %s (%s)",
+        RCLCPP_INFO(this->get_logger(), "[KCF] 状态切换 %s -> %s（原因：%s）",
                     from_s, to_s, reason.c_str());
     }
     std_msgs::msg::String m;
@@ -101,9 +101,9 @@ void ImageConverter::publishConfidence(float v) {
     confidence_pub_->publish(m);
 }
 
-// Build an HSV hue histogram of the target ROI to use as the re-detection
-// appearance model. Saturation / value gating drops low-information pixels so
-// the histogram stays discriminative under modest lighting changes.
+// 对目标 ROI 计算 HSV 色调直方图，作为重检测时的外观模板。
+// 通过 saturation / value 阈值掩膜过滤低信息像素，
+// 让直方图在轻度光照变化下仍有辨识度。
 void ImageConverter::buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi) {
     cv::Rect safe = roi & cv::Rect(0, 0, bgr.cols, bgr.rows);
     if (safe.width < 4 || safe.height < 4) {
@@ -123,10 +123,10 @@ void ImageConverter::buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi) {
     has_target_model = true;
 }
 
-// Closed-loop re-detection: back-project the saved hue histogram over the
-// whole frame, then run CamShift seeded from the image centre. We accept the
-// recovery when the mean back-projection response inside the returned window
-// exceeds recover_threshold, signalling the target is visible again.
+// 闭环重检测：用保存的色调直方图在整帧上做反向投影，
+// 然后以图像中心为初始窗口跑 CamShift 收敛。
+// 当返回窗口内反向投影的平均响应高于 recover_threshold，
+// 即认为目标重新出现，把这个 ROI 交给 KCF 重新初始化。
 bool ImageConverter::redetect(const cv::Mat &bgr, cv::Rect &found) {
     if (!has_target_model || target_hist.empty()) return false;
 
@@ -207,7 +207,7 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
         bRenewROI = false;
         enable_get_depth = false;
         low_conf_count = 0;
-        setState(TrackState::TRACKING, "ROI selected");
+        setState(TrackState::TRACKING, "用户框选目标完成");
     }
     if (bBeginKCF) {
         if (track_state == TrackState::LOST && enable_redetect) {
@@ -218,17 +218,17 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
                 low_conf_count = 0;
                 char reason[96];
                 snprintf(reason, sizeof(reason),
-                         "re-detected at (%d,%d) %dx%d",
+                         "重检测成功 位置(%d,%d) 尺寸 %dx%d",
                          recovered.x, recovered.y,
                          recovered.width, recovered.height);
                 setState(TrackState::TRACKING, reason);
             } else {
-                // Stop the car while we keep searching for the target.
+                // 还没找回目标，先停车继续搜索。
                 vel_pub_->publish(geometry_msgs::msg::Twist());
                 rectangle(rgbimage, result, Scalar(0, 0, 255), 2, 8);
                 putText(rgbimage, "LOST - searching", Point(10, 30),
                         FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 255), 2);
-                // setState is edge-triggered: already LOST -> no log spam.
+                // setState 是边沿触发：已是 LOST 就不会再打印日志，避免刷屏。
             }
         } else {
             float peak = 0.0f;
@@ -242,14 +242,14 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
                     vel_pub_->publish(geometry_msgs::msg::Twist());
                     char reason[96];
                     snprintf(reason, sizeof(reason),
-                             "peak=%.3f < %.3f for %d frames",
+                             "峰值 %.3f < %.3f 持续 %d 帧",
                              peak, lost_threshold, low_conf_count);
                     setState(TrackState::LOST, reason);
                 }
             } else {
                 low_conf_count = 0;
                 char reason[64];
-                snprintf(reason, sizeof(reason), "peak=%.3f recovered", peak);
+                snprintf(reason, sizeof(reason), "峰值 %.3f 已回升", peak);
                 setState(TrackState::TRACKING, reason);
             }
 
@@ -343,18 +343,18 @@ void ImageConverter::JoyCb(const std::shared_ptr<std_msgs::msg::Bool> msg) {
     enable_get_depth = msg->data;
 }
 
-// Hold-off gate driven by the collision_detector node. We don't change the
-// tracking state machine here -- KCF can keep tracking the target visually --
-// we just freeze /cmd_vel for collision_pause_sec so the car can settle after
-// an impact. Edge-triggered logs make pause begin/end easy to spot.
+// 由 collision_detector 触发的暂停门闸。
+// 这里**故意不**改 KCF 状态机 —— 视觉跟踪继续进行 ——
+// 只是把 /cmd_vel 冻结 collision_pause_sec 秒，让小车冲击平息。
+// 暂停起始/结束用边沿日志输出，便于和状态切换日志一起观察。
 void ImageConverter::CollisionCb(const std::shared_ptr<std_msgs::msg::Bool> msg) {
     if (!msg->data) return;
     auto now = this->get_clock()->now();
     auto until = now + rclcpp::Duration::from_seconds(collision_pause_sec);
     collision_pause_until_ = until;
-    vel_pub_->publish(geometry_msgs::msg::Twist());  // immediate stop
+    vel_pub_->publish(geometry_msgs::msg::Twist());  // 立刻急停一帧
     RCLCPP_WARN(this->get_logger(),
-                "[KCF] collision pulse received -> pause cmd_vel for %.2fs",
+                "[KCF] 收到碰撞脉冲 -> 冻结 cmd_vel %.2f 秒",
                 collision_pause_sec);
     was_paused_ = true;
 }
@@ -362,7 +362,8 @@ void ImageConverter::CollisionCb(const std::shared_ptr<std_msgs::msg::Bool> msg)
 bool ImageConverter::inCollisionPause() {
     bool paused = this->get_clock()->now() < collision_pause_until_;
     if (!paused && was_paused_) {
-        RCLCPP_INFO(this->get_logger(), "[KCF] collision pause released, resuming follow");
+        // 从暂停窗口跳出来时打印一次，避免每帧刷屏
+        RCLCPP_INFO(this->get_logger(), "[KCF] 碰撞暂停结束，恢复跟随");
         was_paused_ = false;
     }
     return paused;

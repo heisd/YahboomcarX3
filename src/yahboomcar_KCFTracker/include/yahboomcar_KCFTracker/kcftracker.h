@@ -99,9 +99,8 @@ public:
     // Update position based on the new frame
     virtual cv::Rect update(cv::Mat image);
 
-    // Update overload that also returns the response peak value.
-    // The peak value is the maximum of the KCF response map and is used as a
-    // tracking confidence score by the closed-loop re-detection logic.
+    // update 的重载：同时返回 KCF 响应峰值。
+    // 峰值是响应图的最大值，闭环重检测用它作为跟踪置信度。
     cv::Rect update(cv::Mat image, float &peak_value);
 
     float interp_factor; // linear interpolation factor for adaptation
