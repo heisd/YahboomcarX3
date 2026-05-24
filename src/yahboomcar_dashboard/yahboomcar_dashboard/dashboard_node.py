@@ -174,6 +174,11 @@ class DashboardNode(Node):
         # when the browser stops sending (network drop / tab closed).
         self.create_timer(0.1, self._cmd_watchdog)
 
+        # Cached pose for the scan callback so it does not need to call
+        # SharedState.snapshot() (which deep-copies the whole dict) on every
+        # high-rate /scan message. Updated in _on_odom.
+        self._pose_xy_yaw = (0.0, 0.0, 0.0)
+
         self.get_logger().info('yahboomcar_dashboard node started.')
 
     # --- web -> /cmd_vel --------------------------------------------------
@@ -247,6 +252,9 @@ class DashboardNode(Node):
             'vx': t.linear.x, 'vy': t.linear.y, 'vz': t.linear.z,
             'wx': t.angular.x, 'wy': t.angular.y, 'wz': t.angular.z,
         })
+        # cache for _on_scan; tuple rebind is atomic under the GIL so no
+        # lock is needed even with a multi-threaded executor
+        self._pose_xy_yaw = (p.x, p.y, yaw)
         self.state.touch('odom', self._now())
 
     def _on_imu(self, msg: Imu):
@@ -264,11 +272,10 @@ class DashboardNode(Node):
         self.state.touch('imu', self._now())
 
     def _on_scan(self, msg: LaserScan):
-        # snapshot current robot pose to project scan into the odom frame
-        snap = self.state.snapshot(time.time())
-        rx = snap['odom']['x']
-        ry = snap['odom']['y']
-        ryaw = snap['odom']['yaw']
+        # use cached pose (updated in _on_odom) instead of taking a full
+        # SharedState.snapshot() — the latter does a JSON deep-copy of all
+        # state, which is wasteful on every high-rate /scan callback
+        rx, ry, ryaw = self._pose_xy_yaw
         cos_y = math.cos(ryaw)
         sin_y = math.sin(ryaw)
 
