@@ -57,18 +57,42 @@ void ImageConverter::Reset() {
     this->angular_PID->reset();
     vel_pub_->publish(geometry_msgs::msg::Twist());
 
-    track_state = TrackState::IDLE;
     low_conf_count = 0;
     last_peak_value = 0.0f;
     has_target_model = false;
     target_hist.release();
-    publishStatus("IDLE");
+    setState(TrackState::IDLE, "reset");
 }
 
-void ImageConverter::publishStatus(const std::string &s) {
+const char *ImageConverter::stateName(TrackState s) {
+    switch (s) {
+        case TrackState::IDLE:       return "IDLE";
+        case TrackState::TRACKING:   return "TRACKING";
+        case TrackState::LOST:       return "LOST";
+        case TrackState::RECOVERING: return "RECOVERING";
+    }
+    return "UNKNOWN";
+}
+
+void ImageConverter::onStateChanged(TrackState from, TrackState to, const std::string &reason) {
+    const char *from_s = stateName(from);
+    const char *to_s = stateName(to);
+    if (reason.empty()) {
+        RCLCPP_INFO(this->get_logger(), "[KCF] state %s -> %s", from_s, to_s);
+    } else {
+        RCLCPP_INFO(this->get_logger(), "[KCF] state %s -> %s (%s)",
+                    from_s, to_s, reason.c_str());
+    }
     std_msgs::msg::String m;
-    m.data = s;
+    m.data = to_s;
     status_pub_->publish(m);
+}
+
+void ImageConverter::setState(TrackState new_state, const std::string &reason) {
+    if (new_state == track_state) return;
+    TrackState prev = track_state;
+    track_state = new_state;
+    onStateChanged(prev, new_state, reason);
 }
 
 void ImageConverter::publishConfidence(float v) {
@@ -182,9 +206,8 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
         bBeginKCF = true;
         bRenewROI = false;
         enable_get_depth = false;
-        track_state = TrackState::TRACKING;
         low_conf_count = 0;
-        publishStatus("TRACKING");
+        setState(TrackState::TRACKING, "ROI selected");
     }
     if (bBeginKCF) {
         if (track_state == TrackState::LOST && enable_redetect) {
@@ -192,16 +215,20 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
             if (redetect(rgbimage, recovered)) {
                 tracker.init(recovered, rgbimage);
                 result = recovered;
-                track_state = TrackState::TRACKING;
                 low_conf_count = 0;
-                publishStatus("RECOVERED");
+                char reason[96];
+                snprintf(reason, sizeof(reason),
+                         "re-detected at (%d,%d) %dx%d",
+                         recovered.x, recovered.y,
+                         recovered.width, recovered.height);
+                setState(TrackState::TRACKING, reason);
             } else {
                 // Stop the car while we keep searching for the target.
                 vel_pub_->publish(geometry_msgs::msg::Twist());
                 rectangle(rgbimage, result, Scalar(0, 0, 255), 2, 8);
                 putText(rgbimage, "LOST - searching", Point(10, 30),
                         FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 255), 2);
-                publishStatus("LOST");
+                // setState is edge-triggered: already LOST -> no log spam.
             }
         } else {
             float peak = 0.0f;
@@ -212,13 +239,18 @@ void ImageConverter::imageCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
             if (peak < lost_threshold) {
                 low_conf_count++;
                 if (low_conf_count >= lost_patience) {
-                    track_state = TrackState::LOST;
                     vel_pub_->publish(geometry_msgs::msg::Twist());
-                    publishStatus("LOST");
+                    char reason[96];
+                    snprintf(reason, sizeof(reason),
+                             "peak=%.3f < %.3f for %d frames",
+                             peak, lost_threshold, low_conf_count);
+                    setState(TrackState::LOST, reason);
                 }
             } else {
                 low_conf_count = 0;
-                track_state = TrackState::TRACKING;
+                char reason[64];
+                snprintf(reason, sizeof(reason), "peak=%.3f recovered", peak);
+                setState(TrackState::TRACKING, reason);
             }
 
             Scalar color = (track_state == TrackState::TRACKING) ? Scalar(0, 255, 255) : Scalar(0, 0, 255);

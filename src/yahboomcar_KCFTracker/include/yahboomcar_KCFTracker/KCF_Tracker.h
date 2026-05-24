@@ -135,8 +135,13 @@ public:
 
     void buildTargetModel(const cv::Mat &bgr, const cv::Rect &roi);
     bool redetect(const cv::Mat &bgr, cv::Rect &found);
-    void publishStatus(const std::string &s);
     void publishConfidence(float v);
+
+    // Edge-triggered state transition: only fires (logs + publishes /KCF_status)
+    // when new_state differs from the current track_state.
+    void setState(TrackState new_state, const std::string &reason = "");
+    static const char *stateName(TrackState s);
+    void onStateChanged(TrackState from, TrackState to, const std::string &reason);
     
     //dynamic_reconfigure::Server<yahboomcar_astra::KCFTrackerPIDConfig> server;
     //dynamic_reconfigure::Server<yahboomcar_astra::KCFTrackerPIDConfig>::CallbackType f;
