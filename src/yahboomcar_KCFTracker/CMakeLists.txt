@@ -53,8 +53,7 @@ endif()
         #)
 
 add_executable( KCF_Tracker_Node src/KCF_Tracker_main.cpp src/KCF_Tracker.cpp include/yahboomcar_KCFTracker/kcftracker.cpp include/yahboomcar_KCFTracker/fhog.cpp include/yahboomcar_KCFTracker/PID.cpp)
-#target_link_libraries( KCF_Tracker_Node  ${OpenCV_LIBRARIES} )
-#add_subdirectory(include/yahboomcar_KCFTracker)
+target_link_libraries( KCF_Tracker_Node  ${OpenCV_LIBRARIES} )
 ament_target_dependencies(KCF_Tracker_Node  rclcpp sensor_msgs geometry_msgs std_msgs cv_bridge)
 
 install(

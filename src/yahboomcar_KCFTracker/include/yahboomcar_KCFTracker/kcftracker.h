@@ -99,6 +99,10 @@ public:
     // Update position based on the new frame
     virtual cv::Rect update(cv::Mat image);
 
+    // update 的重载：同时返回 KCF 响应峰值。
+    // 峰值是响应图的最大值，闭环重检测用它作为跟踪置信度。
+    cv::Rect update(cv::Mat image, float &peak_value);
+
     float interp_factor; // linear interpolation factor for adaptation
     float sigma; // gaussian kernel bandwidth
     float lambda; // regularization

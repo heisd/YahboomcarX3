@@ -12,10 +12,17 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
+  <depend>rclcpp</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  
+  <depend>cv_bridge</depend>
+  <depend>libopencv-dev</depend>
+
+  <!-- KCFTracker_safe_launch.py 联合启动 collision_detector，
+       这里声明 exec_depend 让 rosdep / 二进制安装时能正确拉到该包。 -->
+  <exec_depend>yahboomcar_collision</exec_depend>
+
 
   <export>
     <build_type>ament_cmake</build_type>
