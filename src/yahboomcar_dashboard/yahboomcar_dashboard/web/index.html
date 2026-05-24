@@ -582,10 +582,13 @@ async function poll() {
     document.getElementById('cvy').textContent = fmt(c.vy);
     document.getElementById('cwz').textContent = fmt(c.wz);
 
-    // scan
-    document.getElementById('scan-count').textContent = s.scan.count || '--';
-    document.getElementById('scan-min').textContent   = s.scan.min ? s.scan.min + ' m' : '-- m';
-    document.getElementById('scan-max').textContent   = s.scan.max ? s.scan.max + ' m' : '-- m';
+    // scan — explicit null/undefined checks so legitimate 0 readings render
+    document.getElementById('scan-count').textContent =
+      s.scan.count != null ? s.scan.count : '--';
+    document.getElementById('scan-min').textContent =
+      s.scan.min != null ? s.scan.min + ' m' : '-- m';
+    document.getElementById('scan-max').textContent =
+      s.scan.max != null ? s.scan.max + ' m' : '-- m';
 
     // charts
     pushSeries(series.v, { vx: o.vx, vy: o.vy, vz: o.vz });
