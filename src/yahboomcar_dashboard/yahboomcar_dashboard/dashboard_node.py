@@ -150,8 +150,20 @@ class DashboardNode(Node):
         self.create_subscription(Odometry, 'odom', self._on_odom, 10)
         self.create_subscription(Imu, 'imu/data_raw', self._on_imu, sensor_qos)
         self.create_subscription(LaserScan, 'scan', self._on_scan, sensor_qos)
-        self.create_subscription(Bool, 'collision', self._on_collision, 10)
         self.create_subscription(Bool, 'JoyState', self._on_joy, 10)
+
+        # The collision detector publishes on the private topic ~/collision
+        # which resolves to /<node>/collision (default: /collision_detector
+        # /collision). Make this configurable so other setups can rewire it
+        # without an external remap.
+        self.declare_parameter(
+            'collision_topic', '/collision_detector/collision')
+        collision_topic = self.get_parameter(
+            'collision_topic').get_parameter_value().string_value
+        self.create_subscription(
+            Bool, collision_topic, self._on_collision, 10)
+        self.get_logger().info(
+            f'Listening for collision flag on: {collision_topic}')
 
         # publisher for web joystick -> /cmd_vel
         self._cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)

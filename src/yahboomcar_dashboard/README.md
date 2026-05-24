@@ -38,7 +38,7 @@ Yahboomcar X3 的 **Web Dashboard**，在浏览器中实时显示：
 | `odom` | `nav_msgs/Odometry` | 位姿 + 实际线 / 角速度 |
 | `imu/data_raw` | `sensor_msgs/Imu` | ax/ay/az + ωx/ωy/ωz |
 | `scan` | `sensor_msgs/LaserScan` | 激光雷达统计 |
-| `collision` | `std_msgs/Bool` | 碰撞检测 |
+| `/collision_detector/collision`<br/>（可通过 `collision_topic` 参数改） | `std_msgs/Bool` | 碰撞检测 |
 | `JoyState` | `std_msgs/Bool` | 手柄是否接管 |
 
 ## 编译
@@ -74,6 +74,7 @@ http://<机器人IP>:8088/
 |---|---|---|
 | `host` | `0.0.0.0` | HTTP 绑定地址 |
 | `port` | `8088` | HTTP 端口 |
+| `collision_topic` | `/collision_detector/collision` | 碰撞检测话题。`yahboomcar_collision` 用 `~/collision` 私有话题发布，节点名默认为 `collision_detector`，因此完整名是 `/collision_detector/collision`。如自定义了节点名或加了 remap，用本参数覆盖 |
 
 ## 发布的话题
 

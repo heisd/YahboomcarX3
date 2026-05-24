@@ -11,6 +11,11 @@ def generate_launch_description():
     port_arg = DeclareLaunchArgument(
         'port', default_value='8088',
         description='HTTP port for the dashboard.')
+    collision_topic_arg = DeclareLaunchArgument(
+        'collision_topic', default_value='/collision_detector/collision',
+        description='Topic where the collision detector publishes its Bool '
+                    'flag. Default matches yahboomcar_collision\'s ~/collision '
+                    'on a node named "collision_detector".')
 
     dashboard = Node(
         package='yahboomcar_dashboard',
@@ -20,7 +25,8 @@ def generate_launch_description():
         parameters=[{
             'host': LaunchConfiguration('host'),
             'port': LaunchConfiguration('port'),
+            'collision_topic': LaunchConfiguration('collision_topic'),
         }],
     )
 
-    return LaunchDescription([host_arg, port_arg, dashboard])
+    return LaunchDescription([host_arg, port_arg, collision_topic_arg, dashboard])
