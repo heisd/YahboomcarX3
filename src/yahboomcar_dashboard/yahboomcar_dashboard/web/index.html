@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Yahboomcar X3 Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2027;
+    --panel-2: #232b35;
+    --border: #2e3947;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", Roboto, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  main {
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card h2 {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .device-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .device-row:last-child { border-bottom: none; }
+  .device-name { font-weight: 500; }
+  .device-age { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 8px; vertical-align: middle;
+  }
+  .dot.ok   { background: var(--ok);  box-shadow: 0 0 6px var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.err  { background: var(--err); }
+  .kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  .kv .k { color: var(--muted); }
+  .kv .v { text-align: right; font-weight: 500; }
+  .kinematics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .axis-tile {
+    background: var(--panel-2);
+    border-radius: 6px;
+    padding: 10px;
+    text-align: center;
+  }
+  .axis-tile .label {
+    color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .axis-tile .value {
+    font-size: 20px; font-weight: 600; margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .axis-tile .unit { color: var(--muted); font-size: 11px; }
+  .battery {
+    display: flex; align-items: baseline; gap: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .battery .big { font-size: 28px; font-weight: 700; }
+  .battery .unit { color: var(--muted); }
+  .bar {
+    margin-top: 10px;
+    height: 8px;
+    background: var(--panel-2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .bar > div {
+    height: 100%;
+    background: var(--ok);
+    transition: width 0.3s, background 0.3s;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.ok  { background: rgba(63,185,80,0.15);  color: var(--ok); }
+  .badge.err { background: rgba(248,81,73,0.15);  color: var(--err); }
+  .badge.warn{ background: rgba(210,153,34,0.15); color: var(--warn); }
+  #conn-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--muted); font-size: 12px;
+  }
+  canvas { display: block; width: 100%; height: 120px; }
+
+  /* --- joystick --- */
+  .joy-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: center;
+  }
+  .joy-pad {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-width: 180px;
+    margin: 0 auto;
+    background: radial-gradient(circle, var(--panel-2) 60%, var(--panel) 100%);
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+  }
+  .joy-pad.active { cursor: grabbing; border-color: var(--accent); }
+  .joy-knob {
+    position: absolute;
+    width: 36%;
+    height: 36%;
+    left: 32%;
+    top: 32%;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(88,166,255,0.5);
+    pointer-events: none;
+    transition: transform 0.05s linear;
+  }
+  .joy-label {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .joy-readout {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    margin-top: 4px;
+    color: var(--text);
+  }
+  .joy-controls {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .joy-controls label {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--muted); font-size: 12px;
+  }
+  .joy-controls input[type=range] { width: 100px; }
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.danger { background: rgba(248,81,73,0.15); border-color: var(--err); color: var(--err); }
+  .btn.danger:hover { background: rgba(248,81,73,0.25); }
+  .btn.primary { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
+
+  /* --- map card --- */
+  .card.map { grid-column: span 2; }
+  @media (max-width: 900px) { .card.map { grid-column: span 1; } }
+  .map-canvas {
+    width: 100%;
+    height: 480px;
+    background: #0b0f14;
+    border-radius: 6px;
+    display: block;
+    touch-action: none;
+  }
+  .map-toolbar {
+    display: flex; gap: 8px; align-items: center;
+    margin-bottom: 8px; flex-wrap: wrap;
+    color: var(--muted); font-size: 12px;
+  }
+  .map-toolbar .sep { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 Yahboomcar X3 — Web Dashboard</h1>
+  <div id="conn-status"><span class="dot warn"></span><span id="conn-text">连接中…</span></div>
+</header>
+
+<main>
+  <!-- 设备连接状态 -->
+  <section class="card">
+    <h2>设备连接状态</h2>
+    <div id="devices"></div>
+  </section>
+
+  <!-- 电池 / 系统 -->
+  <section class="card">
+    <h2>电池 / 系统</h2>
+    <div class="battery">
+      <span class="big" id="voltage">--</span><span class="unit">V</span>
+    </div>
+    <div class="bar"><div id="vbar" style="width:0%"></div></div>
+    <div class="kv" style="margin-top:14px">
+      <div class="k">固件版本</div><div class="v" id="edition">--</div>
+      <div class="k">安全状态</div><div class="v" id="safety">--</div>
+      <div class="k">碰撞</div><div class="v" id="collision">--</div>
+      <div class="k">手柄接管</div><div class="v" id="joy">--</div>
+    </div>
+  </section>
+
+  <!-- 线速度 vx vy vz -->
+  <section class="card">
+    <h2>线速度 (Odometry)</h2>
+    <div class="kinematics">
+      <div class="axis-tile">
+        <div class="label">vx</div>
+        <div class="value" id="vx">0.000</div>
+        <div class="unit">m/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">vy</div>
+        <div class="value" id="vy">0.000</div>
+        <div class="unit">m/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">vz</div>
+        <div class="value" id="vz">0.000</div>
+        <div class="unit">m/s</div>
+      </div>
+    </div>
+    <canvas id="chart-v" width="600" height="120"></canvas>
+  </section>
+
+  <!-- 加速度 ax ay az -->
+  <section class="card">
+    <h2>线加速度 (IMU)</h2>
+    <div class="kinematics">
+      <div class="axis-tile">
+        <div class="label">ax</div>
+        <div class="value" id="ax">0.000</div>
+        <div class="unit">m/s²</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">ay</div>
+        <div class="value" id="ay">0.000</div>
+        <div class="unit">m/s²</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">az</div>
+        <div class="value" id="az">0.000</div>
+        <div class="unit">m/s²</div>
+      </div>
+    </div>
+    <canvas id="chart-a" width="600" height="120"></canvas>
+  </section>
+
+  <!-- 角速度 -->
+  <section class="card">
+    <h2>角速度 (IMU)</h2>
+    <div class="kinematics">
+      <div class="axis-tile">
+        <div class="label">ωx</div>
+        <div class="value" id="wx">0.000</div>
+        <div class="unit">rad/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">ωy</div>
+        <div class="value" id="wy">0.000</div>
+        <div class="unit">rad/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">ωz</div>
+        <div class="value" id="wz">0.000</div>
+        <div class="unit">rad/s</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 姿态 / 位姿 -->
+  <section class="card">
+    <h2>位姿 (Odom)</h2>
+    <div class="kv">
+      <div class="k">x</div><div class="v" id="px">0.000 m</div>
+      <div class="k">y</div><div class="v" id="py">0.000 m</div>
+      <div class="k">yaw</div><div class="v" id="yaw">0.0°</div>
+      <div class="k">roll</div><div class="v" id="roll">0.0°</div>
+      <div class="k">pitch</div><div class="v" id="pitch">0.0°</div>
+    </div>
+  </section>
+
+  <!-- /cmd_vel -->
+  <section class="card">
+    <h2>cmd_vel (控制指令)</h2>
+    <div class="kinematics">
+      <div class="axis-tile">
+        <div class="label">vx cmd</div>
+        <div class="value" id="cvx">0.000</div>
+        <div class="unit">m/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">vy cmd</div>
+        <div class="value" id="cvy">0.000</div>
+        <div class="unit">m/s</div>
+      </div>
+      <div class="axis-tile">
+        <div class="label">ωz cmd</div>
+        <div class="value" id="cwz">0.000</div>
+        <div class="unit">rad/s</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 激光雷达 -->
+  <section class="card">
+    <h2>激光雷达 /scan</h2>
+    <div class="kv">
+      <div class="k">有效点数</div><div class="v" id="scan-count">--</div>
+      <div class="k">最近距离</div><div class="v" id="scan-min">-- m</div>
+      <div class="k">最远距离</div><div class="v" id="scan-max">-- m</div>
+    </div>
+  </section>
+
+  <!-- 虚拟摇杆 -->
+  <section class="card">
+    <h2>虚拟摇杆 (/cmd_vel)</h2>
+    <div class="joy-wrap">
+      <div>
+        <div class="joy-pad" id="joy-linear">
+          <div class="joy-knob"></div>
+        </div>
+        <div class="joy-label">线速度 (vx / vy)</div>
+        <div class="joy-readout" id="joy-linear-readout">0.00, 0.00 m/s</div>
+      </div>
+      <div>
+        <div class="joy-pad" id="joy-angular">
+          <div class="joy-knob"></div>
+        </div>
+        <div class="joy-label">角速度 (ωz)</div>
+        <div class="joy-readout" id="joy-angular-readout">0.00 rad/s</div>
+      </div>
+      <div class="joy-controls">
+        <label>vmax
+          <input type="range" id="vmax" min="0.1" max="1.0" step="0.05" value="0.4" />
+          <span id="vmax-val">0.40</span>
+        </label>
+        <label>ωmax
+          <input type="range" id="wmax" min="0.2" max="3.0" step="0.1" value="1.5" />
+          <span id="wmax-val">1.50</span>
+        </label>
+        <span class="sep" style="flex:1"></span>
+        <button class="btn danger" id="stop-btn">急停</button>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin:10px 0 0 0;line-height:1.5">
+      支持鼠标和触屏拖动；松开自动归零。<br/>
+      安全：浏览器每 50&nbsp;ms 发送一次心跳，若 400&nbsp;ms 无心跳节点会强制停车。
+    </p>
+  </section>
+
+  <!-- 2D 地图 -->
+  <section class="card map">
+    <h2>2D 地图 (odom + scan)</h2>
+    <div class="map-toolbar">
+      <button class="btn" id="map-zoom-out">−</button>
+      <span id="map-zoom-val">60 px/m</span>
+      <button class="btn" id="map-zoom-in">+</button>
+      <button class="btn" id="map-center">居中</button>
+      <button class="btn" id="map-clear">清空轨迹</button>
+      <label style="margin-left:8px">
+        <input type="checkbox" id="map-follow" checked /> 跟随机器人
+      </label>
+      <span class="sep"></span>
+      <span>轨迹点 <span id="map-traj-count">0</span></span>
+    </div>
+    <canvas id="map" class="map-canvas" width="900" height="480"></canvas>
+  </section>
+</main>
+
+<script>
+const DEVICE_LABELS = {
+  chassis: '底盘驱动 (/voltage)',
+  imu:     'IMU (/imu/data_raw)',
+  odom:    '里程计 (/odom)',
+  lidar:   '激光雷达 (/scan)',
+  cmd_vel: '控制指令 (/cmd_vel)',
+  safety:  '安全状态 (/safety_status)',
+  joy:     '手柄 (/JoyState)',
+};
+
+const fmt = (n, d=3) => (n === null || n === undefined || isNaN(n))
+  ? '--' : Number(n).toFixed(d);
+const deg = (rad) => (rad * 180 / Math.PI).toFixed(1) + '°';
+
+// rolling buffers for charts
+const HISTORY = 120; // ~12s at 10 Hz
+const series = {
+  v: { vx: [], vy: [], vz: [] },
+  a: { ax: [], ay: [], az: [] },
+};
+function pushSeries(s, vals) {
+  for (const k in vals) {
+    s[k].push(vals[k]);
+    if (s[k].length > HISTORY) s[k].shift();
+  }
+}
+
+function drawChart(canvas, data, colors, yRange) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  // grid
+  ctx.strokeStyle = '#2e3947';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, H/2); ctx.lineTo(W, H/2);
+  ctx.stroke();
+
+  // auto-scale
+  let maxAbs = yRange || 0.1;
+  for (const k in data) for (const v of data[k]) {
+    if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+  }
+  maxAbs = Math.max(maxAbs, 0.1);
+
+  const xStep = W / HISTORY;
+  let i = 0;
+  for (const k in data) {
+    const arr = data[k];
+    ctx.strokeStyle = colors[i++];
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    arr.forEach((v, idx) => {
+      const x = idx * xStep;
+      const y = H/2 - (v / maxAbs) * (H/2 - 4);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // legend
+  ctx.font = '10px sans-serif';
+  const keys = Object.keys(data);
+  let lx = 6;
+  keys.forEach((k, idx) => {
+    ctx.fillStyle = colors[idx];
+    ctx.fillRect(lx, 4, 8, 8);
+    ctx.fillStyle = '#8b98a5';
+    ctx.fillText(k, lx + 12, 12);
+    lx += 36;
+  });
+  ctx.fillStyle = '#8b98a5';
+  ctx.fillText('±' + maxAbs.toFixed(2), W - 50, 12);
+}
+
+function renderDevices(devices) {
+  const root = document.getElementById('devices');
+  let html = '';
+  for (const key of Object.keys(DEVICE_LABELS)) {
+    const d = devices[key] || { connected: false, age: null };
+    const cls = d.connected ? 'ok' : (d.age === null ? 'err' : 'warn');
+    const age = d.age === null ? '未收到' : `${d.age}s ago`;
+    html += `
+      <div class="device-row">
+        <div><span class="dot ${cls}"></span>${DEVICE_LABELS[key]}</div>
+        <div>
+          <span class="badge ${d.connected?'ok':'err'}">
+            ${d.connected ? '在线' : '离线'}
+          </span>
+          <span class="device-age">${age}</span>
+        </div>
+      </div>`;
+  }
+  root.innerHTML = html;
+}
+
+function renderBattery(v) {
+  document.getElementById('voltage').textContent = v === null ? '--' : v.toFixed(2);
+  // X3 uses 3S Li-ion roughly 9.0V (empty) -> 12.6V (full)
+  let pct = 0;
+  if (v !== null) {
+    pct = Math.max(0, Math.min(100, (v - 9.0) / (12.6 - 9.0) * 100));
+  }
+  const bar = document.getElementById('vbar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 40 ? 'var(--ok)' : pct > 15 ? 'var(--warn)' : 'var(--err)';
+}
+
+function renderFlag(id, val, okText, badText) {
+  const el = document.getElementById(id);
+  if (val === null || val === undefined) { el.innerHTML = '<span class="badge warn">未知</span>'; return; }
+  el.innerHTML = val
+    ? `<span class="badge ok">${okText}</span>`
+    : `<span class="badge err">${badText}</span>`;
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+
+    document.getElementById('conn-text').textContent = '已连接';
+    document.querySelector('#conn-status .dot').className = 'dot ok';
+
+    renderDevices(s.devices);
+    renderBattery(s.voltage);
+    document.getElementById('edition').textContent =
+      s.edition === null ? '--' : ('v' + s.edition);
+    renderFlag('safety',    s.safety_ok, '正常', '触发');
+    renderFlag('collision', s.collision === null ? null : !s.collision, '无碰撞', '碰撞!');
+    renderFlag('joy',       s.joy_state === null ? null : !s.joy_state, '自动', '手柄');
+
+    // velocity from odom (most accurate)
+    const o = s.odom;
+    document.getElementById('vx').textContent = fmt(o.vx);
+    document.getElementById('vy').textContent = fmt(o.vy);
+    document.getElementById('vz').textContent = fmt(o.vz);
+    document.getElementById('px').textContent = fmt(o.x) + ' m';
+    document.getElementById('py').textContent = fmt(o.y) + ' m';
+    document.getElementById('yaw').textContent   = deg(o.yaw);
+    document.getElementById('roll').textContent  = deg(o.roll);
+    document.getElementById('pitch').textContent = deg(o.pitch);
+
+    // IMU
+    const im = s.imu;
+    document.getElementById('ax').textContent = fmt(im.ax);
+    document.getElementById('ay').textContent = fmt(im.ay);
+    document.getElementById('az').textContent = fmt(im.az);
+    document.getElementById('wx').textContent = fmt(im.wx);
+    document.getElementById('wy').textContent = fmt(im.wy);
+    document.getElementById('wz').textContent = fmt(im.wz);
+
+    // cmd_vel
+    const c = s.cmd_vel;
+    document.getElementById('cvx').textContent = fmt(c.vx);
+    document.getElementById('cvy').textContent = fmt(c.vy);
+    document.getElementById('cwz').textContent = fmt(c.wz);
+
+    // scan — explicit null/undefined checks so legitimate 0 readings render
+    document.getElementById('scan-count').textContent =
+      s.scan.count != null ? s.scan.count : '--';
+    document.getElementById('scan-min').textContent =
+      s.scan.min != null ? s.scan.min + ' m' : '-- m';
+    document.getElementById('scan-max').textContent =
+      s.scan.max != null ? s.scan.max + ' m' : '-- m';
+
+    // feed the same payload into the map so the two views stay in sync
+    updateMapFromState(s);
+
+    // charts
+    pushSeries(series.v, { vx: o.vx, vy: o.vy, vz: o.vz });
+    pushSeries(series.a, { ax: im.ax, ay: im.ay, az: im.az });
+    drawChart(document.getElementById('chart-v'), series.v,
+              ['#58a6ff', '#3fb950', '#d29922'], 0.5);
+    drawChart(document.getElementById('chart-a'), series.a,
+              ['#58a6ff', '#3fb950', '#d29922'], 2.0);
+  } catch (e) {
+    document.getElementById('conn-text').textContent = '连接断开';
+    document.querySelector('#conn-status .dot').className = 'dot err';
+  }
+}
+
+setInterval(poll, 100);  // 10 Hz
+poll();
+
+// =============================================================
+// Virtual joystick -> POST /api/cmd_vel
+// =============================================================
+const joyState = {
+  linear:  { active: false, nx: 0, ny: 0 },  // normalized -1..1
+  angular: { active: false, nx: 0, ny: 0 },
+};
+let vmax = 0.4, wmax = 1.5;
+
+function bindJoystick(padId, key) {
+  const pad = document.getElementById(padId);
+  const knob = pad.querySelector('.joy-knob');
+
+  function setKnob(nx, ny) {
+    // nx,ny in [-1,1], map to half-width offset
+    const tx = nx * 50; // % of pad width relative to its center
+    const ty = ny * 50;
+    knob.style.transform = `translate(${tx}%, ${ty}%)`;
+  }
+  function update(e, active) {
+    const rect = pad.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const point = (e.touches && e.touches[0]) || e;
+    let dx = (point.clientX - cx) / (rect.width / 2);
+    let dy = (point.clientY - cy) / (rect.height / 2);
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    if (key === 'angular') dy = 0; // angular pad: horizontal only
+    joyState[key].nx = dx;
+    joyState[key].ny = dy;
+    joyState[key].active = active;
+    setKnob(dx, dy);
+    pad.classList.toggle('active', active);
+  }
+  function release() {
+    joyState[key].nx = 0;
+    joyState[key].ny = 0;
+    joyState[key].active = false;
+    setKnob(0, 0);
+    pad.classList.remove('active');
+    sendCmdVel(true);  // send one immediate zero
+  }
+
+  pad.addEventListener('mousedown', (e) => { e.preventDefault(); update(e, true); });
+  window.addEventListener('mousemove', (e) => {
+    if (joyState[key].active) update(e, true);
+  });
+  window.addEventListener('mouseup', () => {
+    if (joyState[key].active) release();
+  });
+  pad.addEventListener('touchstart', (e) => { e.preventDefault(); update(e, true); }, { passive: false });
+  pad.addEventListener('touchmove',  (e) => { e.preventDefault(); update(e, true); }, { passive: false });
+  pad.addEventListener('touchend',   () => release());
+  pad.addEventListener('touchcancel',() => release());
+}
+bindJoystick('joy-linear',  'linear');
+bindJoystick('joy-angular', 'angular');
+
+document.getElementById('vmax').addEventListener('input', (e) => {
+  vmax = parseFloat(e.target.value);
+  document.getElementById('vmax-val').textContent = vmax.toFixed(2);
+});
+document.getElementById('wmax').addEventListener('input', (e) => {
+  wmax = parseFloat(e.target.value);
+  document.getElementById('wmax-val').textContent = wmax.toFixed(2);
+});
+document.getElementById('stop-btn').addEventListener('click', () => {
+  joyState.linear.nx = joyState.linear.ny = 0;
+  joyState.angular.nx = joyState.angular.ny = 0;
+  joyState.linear.active = joyState.angular.active = false;
+  document.querySelectorAll('.joy-knob').forEach(k => k.style.transform = 'translate(0,0)');
+  document.querySelectorAll('.joy-pad').forEach(p => p.classList.remove('active'));
+  sendCmdVel(true);
+});
+
+async function sendCmdVel(force=false) {
+  const ln = joyState.linear, ag = joyState.angular;
+  const active = ln.active || ag.active;
+  if (!active && !force) return;
+  // mecanum convention: nx (left/right) -> vy, ny (up/down) -> vx (inverted)
+  const vx = -ln.ny * vmax;
+  const vy = -ln.nx * vmax;
+  const wz = -ag.nx * wmax;
+  try {
+    await fetch('/api/cmd_vel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vx, vy, wz }),
+    });
+  } catch (_) { /* ignore; watchdog handles */ }
+  document.getElementById('joy-linear-readout').textContent =
+    `${vx.toFixed(2)}, ${vy.toFixed(2)} m/s`;
+  document.getElementById('joy-angular-readout').textContent =
+    `${wz.toFixed(2)} rad/s`;
+}
+setInterval(() => sendCmdVel(false), 50);  // 20 Hz heartbeat while active
+
+// =============================================================
+// 2D map view: odom trajectory + laser scan, robot-centered
+// =============================================================
+const mapCanvas = document.getElementById('map');
+const mapCtx = mapCanvas.getContext('2d');
+const mapState = {
+  scale: 60,          // pixels per meter
+  offsetX: 0,         // world->canvas translate (px) when not following
+  offsetY: 0,
+  follow: true,
+  trajectory: [],     // [[x,y], ...] in odom frame
+  lastTrajPoint: null,
+  scanXY: [],         // [[x,y], ...] in odom frame, latest scan
+  robot: { x: 0, y: 0, yaw: 0, valid: false },
+  panning: false, panStart: null, panOffsetStart: null,
+};
+
+function resizeMap() {
+  const r = mapCanvas.getBoundingClientRect();
+  mapCanvas.width = Math.floor(r.width);
+  mapCanvas.height = Math.floor(r.height);
+}
+window.addEventListener('resize', resizeMap);
+resizeMap();
+
+function worldToCanvas(wx, wy) {
+  const cx = mapCanvas.width / 2;
+  const cy = mapCanvas.height / 2;
+  if (mapState.follow && mapState.robot.valid) {
+    return [
+      cx + (wx - mapState.robot.x) * mapState.scale,
+      cy - (wy - mapState.robot.y) * mapState.scale,
+    ];
+  }
+  return [
+    cx + wx * mapState.scale + mapState.offsetX,
+    cy - wy * mapState.scale + mapState.offsetY,
+  ];
+}
+
+function drawGrid() {
+  const ctx = mapCtx;
+  const W = mapCanvas.width, H = mapCanvas.height;
+  ctx.fillStyle = '#0b0f14';
+  ctx.fillRect(0, 0, W, H);
+
+  // grid lines every 1 meter, plus a fainter half-meter
+  ctx.lineWidth = 1;
+  const stepMinor = mapState.scale * 0.5;
+  const stepMajor = mapState.scale * 1.0;
+
+  // anchor grid to world origin
+  const [ox, oy] = worldToCanvas(0, 0);
+
+  function vlines(step, color) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    const startX = ox - Math.floor(ox / step) * step;
+    for (let x = startX % step; x < W; x += step) {
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+  }
+  function hlines(step, color) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    const startY = oy - Math.floor(oy / step) * step;
+    for (let y = startY % step; y < H; y += step) {
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+  }
+  if (stepMinor >= 8) {
+    vlines(stepMinor, '#161d27');
+    hlines(stepMinor, '#161d27');
+  }
+  if (stepMajor >= 12) {
+    vlines(stepMajor, '#202b3a');
+    hlines(stepMajor, '#202b3a');
+  }
+  // world axes through origin
+  ctx.strokeStyle = '#2e3947';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(ox, 0); ctx.lineTo(ox, H);
+  ctx.moveTo(0, oy); ctx.lineTo(W, oy);
+  ctx.stroke();
+  // origin label
+  ctx.fillStyle = '#8b98a5';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('odom (0,0)', ox + 4, oy - 4);
+}
+
+function drawScan() {
+  if (!mapState.scanXY.length) return;
+  const ctx = mapCtx;
+  ctx.fillStyle = 'rgba(248,81,73,0.85)';
+  for (const [x, y] of mapState.scanXY) {
+    const [px, py] = worldToCanvas(x, y);
+    ctx.fillRect(px - 1, py - 1, 2, 2);
+  }
+}
+
+function drawTrajectory() {
+  const t = mapState.trajectory;
+  if (t.length < 2) return;
+  const ctx = mapCtx;
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < t.length; i++) {
+    const [px, py] = worldToCanvas(t[i][0], t[i][1]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+function drawRobot() {
+  if (!mapState.robot.valid) return;
+  const ctx = mapCtx;
+  const [px, py] = worldToCanvas(mapState.robot.x, mapState.robot.y);
+  const size = Math.max(10, mapState.scale * 0.18);
+  ctx.save();
+  ctx.translate(px, py);
+  // canvas Y is inverted vs world Y; rotate by -yaw to align
+  ctx.rotate(-mapState.robot.yaw);
+  // triangle pointing +X (forward)
+  ctx.beginPath();
+  ctx.moveTo(size, 0);
+  ctx.lineTo(-size * 0.7,  size * 0.6);
+  ctx.lineTo(-size * 0.7, -size * 0.6);
+  ctx.closePath();
+  ctx.fillStyle = '#3fb950';
+  ctx.fill();
+  ctx.strokeStyle = '#e6edf3';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawScaleBar() {
+  const ctx = mapCtx;
+  const px = mapState.scale;  // pixels per meter
+  const y = mapCanvas.height - 16;
+  ctx.strokeStyle = '#e6edf3';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(12, y); ctx.lineTo(12 + px, y);
+  ctx.moveTo(12, y - 4); ctx.lineTo(12, y + 4);
+  ctx.moveTo(12 + px, y - 4); ctx.lineTo(12 + px, y + 4);
+  ctx.stroke();
+  ctx.fillStyle = '#8b98a5';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('1 m', 16 + px, y - 4);
+}
+
+function renderMap() {
+  drawGrid();
+  drawScan();
+  drawTrajectory();
+  drawRobot();
+  drawScaleBar();
+}
+setInterval(renderMap, 100);
+
+// Fed by poll() from the shared /api/state payload — no separate fetch,
+// so the map and the rest of the dashboard always render the same snapshot.
+function updateMapFromState(s) {
+  const o = s.odom;
+  mapState.robot = { x: o.x, y: o.y, yaw: o.yaw, valid: true };
+  mapState.scanXY = s.scan_xy || [];
+  // append trajectory only when moved >2cm to keep buffer small
+  const last = mapState.lastTrajPoint;
+  if (!last || Math.hypot(o.x - last[0], o.y - last[1]) > 0.02) {
+    mapState.trajectory.push([o.x, o.y]);
+    mapState.lastTrajPoint = [o.x, o.y];
+    if (mapState.trajectory.length > 2000) mapState.trajectory.shift();
+  }
+  document.getElementById('map-traj-count').textContent = mapState.trajectory.length;
+}
+
+// map controls
+document.getElementById('map-zoom-in').addEventListener('click', () => {
+  mapState.scale = Math.min(400, mapState.scale * 1.25);
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+});
+document.getElementById('map-zoom-out').addEventListener('click', () => {
+  mapState.scale = Math.max(10, mapState.scale / 1.25);
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+});
+document.getElementById('map-center').addEventListener('click', () => {
+  mapState.offsetX = 0; mapState.offsetY = 0;
+});
+document.getElementById('map-clear').addEventListener('click', () => {
+  mapState.trajectory = [];
+  mapState.lastTrajPoint = null;
+});
+document.getElementById('map-follow').addEventListener('change', (e) => {
+  mapState.follow = e.target.checked;
+});
+
+// click+drag to pan when not following
+mapCanvas.addEventListener('mousedown', (e) => {
+  if (mapState.follow) return;
+  mapState.panning = true;
+  mapState.panStart = [e.clientX, e.clientY];
+  mapState.panOffsetStart = [mapState.offsetX, mapState.offsetY];
+});
+window.addEventListener('mousemove', (e) => {
+  if (!mapState.panning) return;
+  mapState.offsetX = mapState.panOffsetStart[0] + (e.clientX - mapState.panStart[0]);
+  mapState.offsetY = mapState.panOffsetStart[1] + (e.clientY - mapState.panStart[1]);
+});
+window.addEventListener('mouseup', () => { mapState.panning = false; });
+mapCanvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
+  mapState.scale = Math.max(10, Math.min(400, mapState.scale * factor));
+  document.getElementById('map-zoom-val').textContent = Math.round(mapState.scale) + ' px/m';
+}, { passive: false });
+</script>
+</body>
+</html>
