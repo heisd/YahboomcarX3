@@ -41,8 +41,8 @@ YahboomcarX3/
 
 ## 依赖环境
 
-- **OS**：Ubuntu 20.04 / 22.04
-- **ROS 2**：Foxy / Humble（推荐 Humble）
+- **OS**：Ubuntu 24.04
+- **ROS 2**：Jazzy
 - **Python**：rclpy、opencv-python、numpy
 - **C++**：rclcpp、tf2、cv_bridge、OpenCV
 - **第三方 ROS 包**：
@@ -56,8 +56,10 @@ YahboomcarX3/
 
 ```bash
 # 1. 安装 Rosmaster_Lib（下位机串口库）
+# 注意：Ubuntu 24.04 (Jazzy) 的 setuptools 已移除 "setup.py install"，且系统 Python
+# 受 PEP 668 保护，需使用 pip 安装（--break-system-packages 写入系统 site-packages）。
 cd src/py_install
-sudo python3 setup.py install
+sudo pip3 install . --break-system-packages
 cd ../..
 
 # 2. 安装 ROS 依赖

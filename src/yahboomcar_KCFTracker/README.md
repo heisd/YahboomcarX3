@@ -105,14 +105,14 @@ ros2 launch yahboomcar_KCFTracker KCFTracker_safe_launch.py \
 
 ### 运行环境
 
-需要 ROS 2 Humble + OpenCV ≥ 4。如果使用本机的 `ros:humble` Docker 镜像，可这样进镜像构建：
+需要 ROS 2 Jazzy + OpenCV ≥ 4。如果使用本机的 `ros:jazzy` Docker 镜像，可这样进镜像构建：
 
 ```bash
 docker run --rm -it \
   -v $(pwd):/ws \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
-  ros:humble bash
+  ros:jazzy bash
 # 在容器内：
 cd /ws && rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-select yahboomcar_KCFTracker

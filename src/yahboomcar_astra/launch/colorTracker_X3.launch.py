@@ -16,13 +16,13 @@ def generate_launch_description():
     ))
     colorIdentify_node =  Node(
                                 package='yahboomcar_astra',
-                                node_executable='colorHSV',
-                                node_name='coloridentify'
+                                executable='colorHSV',
+                                name='coloridentify'
                                 )
     '''colorTracker_node = Node(
                                 package='yahboomcar_astra',
-                                node_executable='colorTraker',
-                                node_name='colortracker'
+                                executable='colorTraker',
+                                name='colortracker'
                                 )'''
     return LaunchDescription([#astra_node,
                               driver_node,

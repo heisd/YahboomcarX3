@@ -53,7 +53,9 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_footprint
     odom_topic: /odom
-    default_bt_xml_filename: "navigate_w_replanning_and_recovery.xml"
+    # default_nav_to_pose_bt_xml / default_nav_through_poses_bt_xml omitted on
+    # purpose: bt_navigator falls back to the BT trees installed with
+    # nav2_bt_navigator. Set them to absolute paths only when using custom trees.
     plugin_lib_names:
     - nav2_compute_path_to_pose_action_bt_node
     - nav2_follow_path_action_bt_node
@@ -85,12 +87,12 @@ bt_navigator_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
-    ontroller_frequency: 20.0
+    controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
-    progress_checker_plugin: "progress_checker"
-    goal_checker_plugin: "goal_checker"
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
     controller_plugins: ["FollowPath"]
     # Progress checker parameters
     progress_checker:
@@ -244,7 +246,7 @@ global_costmap:
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
-        nabled: true
+        enabled: true
         subscribe_to_updates: true
         transform_tolerance: 0.1
       inflation_layer:
@@ -283,7 +285,7 @@ planner_server:
     use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
+      plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.5
       use_astar: false
       allow_unknown: true
@@ -292,18 +294,18 @@ planner_server_rclcpp_node:
   ros__parameters:
     use_sim_time: False
 
-recoveries_server:
+behavior_server:
   ros__parameters:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    recovery_plugins: ["spin", "backup", "wait"]
+    behavior_plugins: ["spin", "backup", "wait"]
     spin:
-      plugin: "nav2_recoveries/Spin"
+      plugin: "nav2_behaviors::Spin"
     backup:
-      plugin: "nav2_recoveries/BackUp"
+      plugin: "nav2_behaviors::BackUp"
     wait:
-      plugin: "nav2_recoveries/Wait"
+      plugin: "nav2_behaviors::Wait"
     global_frame: odom
     robot_base_frame: base_footprint
     transform_timeout: 0.1

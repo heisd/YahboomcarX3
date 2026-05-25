@@ -141,7 +141,7 @@ colcon build
 
 ##   4. 测试
 
-> 代码支持ubuntu20.04 ROS2 foxy版本及以上测试，使用rviz2可视化。
+> 代码支持 ubuntu 20.04 ROS2 foxy 版本及以上（含 ubuntu 24.04 / ROS 2 Jazzy）测试，使用 rviz2 可视化。
 - 新打开一个终端 (Ctrl + Alt + T),运行命令:`rviz2`,并通过Rviz2工具打开readme文件所在目录的rviz2文件夹下面的ldlidar.rviz文件
 ```bash
 rviz2
@@ -292,7 +292,7 @@ colcon build
 
 ## step 4: test
 
-> The code supports ubuntu 20.04 ros2 foxy version and above, using rviz2 visualization.
+> The code supports ubuntu 20.04 ros2 foxy version and above (including ubuntu 24.04 / ROS 2 Jazzy), using rviz2 visualization.
 
 - new a terminal (Ctrl + Alt + T) and use Rviz2 tool(run command: `rviz2`) ,open the `ldlidar.rviz` file below the rviz2 folder of the readme file directory
 ```bash

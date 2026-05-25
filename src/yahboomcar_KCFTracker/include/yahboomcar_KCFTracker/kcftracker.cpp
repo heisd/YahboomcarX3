@@ -401,8 +401,7 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat &image, bool inithann, float scale
 
     // HOG features
     if (_hogfeatures) {
-        IplImage z_ipl = IplImage(z);
-//        IplImage z_ipl = cvIplImage(z);
+        IplImage z_ipl = cvIplImage(z);
         CvLSVMFeatureMapCaskade *map;
         getFeatureMaps(&z_ipl, cell_size, &map);
         normalizeAndTruncate(map, 0.2f);

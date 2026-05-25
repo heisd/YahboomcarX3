@@ -8,4 +8,4 @@ setup(
 )
 
 # cd py_install
-# sudo python3 setup.py install
+# sudo pip3 install . --break-system-packages
