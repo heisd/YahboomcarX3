@@ -16,6 +16,7 @@ YahboomcarX3/
     ├── yahboomcar_bringup/       # 整车启动包：底盘驱动 / EKF / 标定 / 巡逻
     ├── yahboomcar_collision/     # 基于 IMU 加速度突变的碰撞检测
     ├── yahboomcar_ctrl/          # 键盘 / 手柄遥控
+    ├── yahboomcar_dashboard/     # Web 仪表盘：状态监控 + 虚拟摇杆 + 2D 地图
     ├── yahboomcar_description/   # URDF / Xacro / 网格模型
     ├── yahboomcar_laser/         # 激光避障 / 跟随 / 防撞
     ├── yahboomcar_linefollow/    # 视觉巡线（HSV + ROI + PID）
@@ -28,15 +29,16 @@ YahboomcarX3/
 |---|---|---|
 | `ldlidar_stl_ros2` | C++ | 乐动 LD06 / LD19 激光雷达 ROS 2 驱动，发布 `/scan` |
 | `py_install` | Python 库 | `Rosmaster_Lib`，封装与下位机的串口通信（电机、IMU、灯效等） |
-| `yahboomcar_KCFTracker` | C++ | 基于 KCF 算法的目标跟踪，鼠标框选目标后 PID 跟随 |
+| `yahboomcar_KCFTracker` | C++ | 基于 KCF 算法的目标跟踪，鼠标框选后 PID 跟随；含置信度闭环重检测（CamShift 恢复）与碰撞暂停联动 |
 | `yahboomcar_astra` | Python | Astra 深度相机颜色识别与跟随（含 HSV 调试工具） |
 | `yahboomcar_base_node` | C++ | C++ 版底盘里程节点，发布 `odom` 与 `odom→base_footprint` TF |
 | `yahboomcar_bringup` | Python | **整车启动入口**：底盘驱动、IMU 滤波、EKF 融合、里程标定、巡逻示例 |
-| `yahboomcar_collision` | Python | 基于 IMU 冲击信号的碰撞检测，触发后可发布 `/collision` 并急停 |
+| `yahboomcar_collision` | Python | 基于 IMU 冲击信号的碰撞检测，触发后发布 `~/collision`（即 `/collision_detector/collision`），可选急停 |
 | `yahboomcar_ctrl` | Python | 终端键盘遥控 (`yahboom_keyboard`)、手柄遥控 (`yahboom_joy_X3` / `R2`) |
+| `yahboomcar_dashboard` | Python | **Web 仪表盘**：浏览器实时查看设备在线状态 / 电压 / 速度 / 加速度 + 折线图，含虚拟摇杆遥控与 odom 2D 地图；内置标准库 HTTP 服务，无需 Flask / rosbridge |
 | `yahboomcar_description` | Python (ament) | X3 / X4 / R2 等车型 URDF、网格与 RViz 显示 |
 | `yahboomcar_laser` | Python | 激光避障 / 跟随 / 警告三个节点，支持 `/JoyState` 手柄接管暂停 |
-| `yahboomcar_linefollow` | Python | 视觉巡线，detect 模式学习 HSV、track 模式 PID 巡线 |
+| `yahboomcar_linefollow` | Python | 视觉巡线：detect 模式学习并持久化 HSV（`params/HSV.txt`）、track 模式 PID 巡线，支持碰撞暂停联动 |
 | `yahboomcar_nav` | Python | GMapping / Cartographer / RTAB-Map 建图 + Nav2 (DWA / TEB) 导航 |
 
 ## 依赖环境
@@ -81,6 +83,9 @@ ros2 launch yahboomcar_bringup yahboomcar_bringup_X3_launch.py
 # 键盘遥控
 ros2 run yahboomcar_ctrl yahboom_keyboard
 
+# Web 仪表盘（浏览器打开 http://<机器人IP>:8088/，含状态监控、虚拟摇杆与 2D 地图）
+ros2 launch yahboomcar_dashboard dashboard_launch.py
+
 # 激光雷达
 ros2 launch ldlidar_stl_ros2 ld19.launch.py
 
@@ -103,7 +108,7 @@ ros2 launch yahboomcar_nav navigation_dwa_launch.py
 | `/scan` | `sensor_msgs/LaserScan` | 2D 激光雷达 |
 | `/JoyState` | `std_msgs/Bool` | 手柄是否接管；自主节点据此暂停 |
 | `/RGBLight` | `std_msgs/Int32` | 车顶 RGB 灯效控制 |
-| `/collision` | `std_msgs/Bool` | 碰撞检测标志 |
+| `/collision_detector/collision` | `std_msgs/Bool` | 碰撞检测标志（`yahboomcar_collision` 节点的 `~/collision`） |
 
 ## 各车型说明
 
