@@ -17,14 +17,13 @@ def write_HSV(wf_path, value):
 
 
 def read_HSV(rf_path):
-    rf = open(rf_path, "r+")
-    line = rf.readline()
+    with open(rf_path, "r") as rf:
+        line = rf.readline()
     if len(line) == 0: return ()
     list = line.split(',')
     if len(list) != 6: return ()
     hsv = ((int(list[0]), int(list[1]), int(list[2])),
            (int(list[3]), int(list[4]), int(list[5])))
-    rf.flush()
     return hsv
 
 
@@ -111,19 +110,15 @@ class color_follow:
         # 根据特定颜色范围创建mask
         # Create a mask based on a specific color range
         mask = cv.inRange(src, lower, upper)
-        color_mask = cv.bitwise_and(src, src, mask=mask)
-        # 将图像转为灰度图
-        # Convert the image to grayscale
-        gray_img = cv.cvtColor(color_mask, cv.COLOR_RGB2GRAY)
         # 获取不同形状的结构元素
         # Get structure elements of different shapes
         kernel = cv.getStructuringElement(cv.MORPH_RECT, (5, 5))
         # 形态学闭操作
         # Morphological closed operation
-        gray_img = cv.morphologyEx(gray_img, cv.MORPH_CLOSE, kernel)
+        mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
         # 图像二值化操作
         # Image binarization operation
-        ret, binary = cv.threshold(gray_img, 10, 255, cv.THRESH_BINARY)
+        ret, binary = cv.threshold(mask, 10, 255, cv.THRESH_BINARY)
         # 获取轮廓点集(坐标)
         # Get the set of contour points (coordinates)
         find_contours = cv.findContours(binary, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -137,7 +132,7 @@ class color_follow:
             max_id = areas.index(max(areas))
             max_rect = cv.minAreaRect(contours[max_id])
             max_box = cv.boxPoints(max_rect)
-            max_box = np.int0(max_box)
+            max_box = np.intp(max_box)
             (color_x, color_y), color_radius = cv.minEnclosingCircle(max_box)
             # 将检测到的颜色用原形线圈标记出来
             # Mark the detected color with the original shape coil
@@ -183,7 +178,7 @@ class color_follow:
         V_min = min(V); V_max = 255
         # HSV范围调整
         # HSV range adjustment
-        if H_max + 5 > 255: H_max = 255
+        if H_max + 5 > 179: H_max = 179
         else: H_max += 5
         if H_min - 5 < 0: H_min = 0
         else: H_min -= 5

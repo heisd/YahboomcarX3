@@ -7,7 +7,6 @@ from sensor_msgs.msg import CompressedImage, LaserScan, Image
 from yahboomcar_msgs.msg import Position
 #common lib
 import os
-import threading
 import math
 from yahboomcar_astra.astra_common import *
 from yahboomcar_msgs.msg import Position
@@ -18,14 +17,12 @@ class Color_Identify(Node):
     def __init__(self,name):
         super().__init__(name)
         #create a publisher
-        self.end=0
+        self.end = time.time()
         self.pub_position = self.create_publisher(Position,"/Current_point", 10)
         self.pub_cmdVel = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.index = 2
         self.Roi_init = ()
         self.hsv_range = ()
         self.circle = (0, 0, 0)
-        self.point_pose = (0, 0, 0)
         self.dyn_update = True
         self.Start_state = True
         self.select_flags = False
@@ -36,8 +33,8 @@ class Color_Identify(Node):
         self.cols, self.rows = 0, 0
         self.Mouse_XY = (0, 0)
        
-       self.declare_param()
-        self.hsv_text = "/root/yahboomcar_ros2_ws/yahboomcar_ws/src/yahboomcar_astra/yahboomcar_astra/colorHSV.text"
+        self.declare_param()
+        self.hsv_text = os.path.join(os.path.dirname(os.path.abspath(__file__)), "colorHSV.text")
         
         self.capture = cv.VideoCapture(0)
         if cv_edition[0]=='3': self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'XVID'))
@@ -65,29 +62,35 @@ class Color_Identify(Node):
 
         
     def on_timer(self):
-        
         ret, frame = self.capture.read()
+        if not ret or frame is None:
+            return
         action = cv.waitKey(10) & 0xFF
-        frame, binary =self.process(frame, action)
-        start = time.time()
-        fps = 1 / (start - self.end)
-        self.end = time.time()
+        frame, binary = self.process(frame, action)
+        now = time.time()
+        fps = 1 / (now - self.end) if now > self.end else 0.0
+        self.end = now
         text = "FPS : " + str(int(fps))
         cv.putText(frame, text, (30, 30), cv.FONT_HERSHEY_SIMPLEX, 0.6, (100, 200, 200), 1)
         if len(binary) != 0: cv.imshow('frame', ManyImgs(1, ([frame, binary])))
-        else:cv.imshow('frame', frame)
-        if action == ord('q') or action == 113:
-            self.capture.release()
-            cv.destroyAllWindows()
+        else: cv.imshow('frame', frame)
+        if action == ord('q') or action == ord('Q') or action == 113:
+            self.cancel()
             
     def process(self, rgb_img, action):
         self.get_param()
+        if self.refresh:
+            self.hsv_range = ((self.Hmin, self.Smin, self.Vmin),
+                              (self.Hmax, self.Smax, self.Vmax))
+            write_HSV(self.hsv_text, self.hsv_range)
+            self.set_parameters([rclpy.parameter.Parameter(
+                'refresh', rclpy.Parameter.Type.BOOL, False)])
+            self.refresh = False
         rgb_img = cv.resize(rgb_img, (640, 480))
         binary = []
         if action == 32: self.Track_state = 'tracking'
         elif action == ord('i') or action == ord('I'): self.Track_state = "identify"
         elif action == ord('r') or action == ord('R'): self.Reset()
-        elif action == ord('q') or action == ord('Q'): self.cancel()
         if self.Track_state == 'init':
             cv.namedWindow(self.windows_name, cv.WINDOW_AUTOSIZE)
             cv.setMouseCallback(self.windows_name, self.onMouse, 0)
@@ -100,29 +103,28 @@ class Color_Identify(Node):
                     self.dyn_update = True
                 else: self.Track_state = 'init'
         elif self.Track_state == "identify":
-            if os.path.exists(self.hsv_text): self.hsv_range = read_HSV(self.hsv_text)
-            else: self.Track_state = 'init'
+            if len(self.hsv_range) == 0:
+                if os.path.exists(self.hsv_text): self.hsv_range = read_HSV(self.hsv_text)
+                else: self.Track_state = 'init'
         if self.Track_state != 'init':
             if len(self.hsv_range) != 0:
                 rgb_img, binary, self.circle = self.color.object_follow(rgb_img, self.hsv_range)
                 if self.dyn_update == True:
                     write_HSV(self.hsv_text, self.hsv_range)
-                    self.Hmin  = rclpy.parameter.Parameter('Hmin',rclpy.Parameter.Type.INTEGER,self.hsv_range[0][0])
-                    self.Smin  = rclpy.parameter.Parameter('Smin',rclpy.Parameter.Type.INTEGER,self.hsv_range[0][1])
-                    self.Vmin  = rclpy.parameter.Parameter('Vmin',rclpy.Parameter.Type.INTEGER,self.hsv_range[0][2])
-                    self.Hmax  = rclpy.parameter.Parameter('Hmax',rclpy.Parameter.Type.INTEGER,self.hsv_range[1][0])
-                    self.Smax  = rclpy.parameter.Parameter('Smax',rclpy.Parameter.Type.INTEGER,self.hsv_range[1][1])
-                    self.Vmax  = rclpy.parameter.Parameter('Vmax',rclpy.Parameter.Type.INTEGER,self.hsv_range[1][2])
-                    all_new_parameters = [self.Hmin,self.Smin,self.Vmin,self.Hmax,self.Smax,self.Vmax]
+                    all_new_parameters = [
+                        rclpy.parameter.Parameter('Hmin', rclpy.Parameter.Type.INTEGER, self.hsv_range[0][0]),
+                        rclpy.parameter.Parameter('Smin', rclpy.Parameter.Type.INTEGER, self.hsv_range[0][1]),
+                        rclpy.parameter.Parameter('Vmin', rclpy.Parameter.Type.INTEGER, self.hsv_range[0][2]),
+                        rclpy.parameter.Parameter('Hmax', rclpy.Parameter.Type.INTEGER, self.hsv_range[1][0]),
+                        rclpy.parameter.Parameter('Smax', rclpy.Parameter.Type.INTEGER, self.hsv_range[1][1]),
+                        rclpy.parameter.Parameter('Vmax', rclpy.Parameter.Type.INTEGER, self.hsv_range[1][2]),
+                    ]
                     self.set_parameters(all_new_parameters)
-                    
-                    self.dyn_update = False     
+                    self.dyn_update = False
         if self.Track_state == 'tracking':
             self.Start_state = True
-            if self.circle[2] != 0: threading.Thread(
-                target=self.execute, args=(self.circle[0], self.circle[1], self.circle[2])).start()
-            if self.point_pose[0] != 0 and self.point_pose[1] != 0: threading.Thread(
-                target=self.execute, args=(self.point_pose[0], self.point_pose[1], self.point_pose[2])).start()
+            if self.circle[2] != 0:
+                self.execute(self.circle[0], self.circle[1], self.circle[2])
         else:
             if self.Start_state == True:
                 self.pub_cmdVel.publish(Twist())
@@ -156,7 +158,10 @@ class Color_Identify(Node):
         
     def cancel(self):
         print("Shutting down this node.")
+        self.timer.cancel()
+        self.capture.release()
         cv.destroyAllWindows()
+        if rclpy.ok(): rclpy.shutdown()
         
     def onMouse(self, event, x, y, flags, param):
         if event == 1:
@@ -177,4 +182,10 @@ def main():
     rclpy.init()
     color_identify = Color_Identify("ColorIdentify")
     print("start it")
-    rclpy.spin(color_identify)
+    try:
+        rclpy.spin(color_identify)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        color_identify.destroy_node()
+        if rclpy.ok(): rclpy.shutdown()
