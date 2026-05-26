@@ -11,7 +11,10 @@ Topics:
     subscribes /JoyState (std_msgs/Bool)  -- when True, pause autonomy
 
 Parameters:
-    camera_index        int   default 0
+    camera_index        int   default 0   (used only when image_topic is empty)
+    image_topic         str   ''   subscribe to this sensor_msgs/Image instead
+                                    of opening a local camera (e.g. Gazebo's
+                                    /camera/image_raw). Empty = use camera_index.
     frame_width         int   640
     frame_height        int   480
     hsv_file            str   ~/.yahboomcar_linefollow_hsv.txt
@@ -32,6 +35,7 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Image
 from std_msgs.msg import Bool
 
 from ament_index_python.packages import get_package_share_directory
@@ -57,6 +61,7 @@ class LineTrack(Node):
         super().__init__('line_track')
 
         self.declare_parameter('camera_index', 0)
+        self.declare_parameter('image_topic', '')
         self.declare_parameter('frame_width', 640)
         self.declare_parameter('frame_height', 480)
         self.declare_parameter('hsv_file', _default_hsv_path())
@@ -77,6 +82,7 @@ class LineTrack(Node):
         self.declare_parameter('collision_pause_sec', 2.0)
 
         self.cam_index = self.get_parameter('camera_index').value
+        self.image_topic = str(self.get_parameter('image_topic').value)
         self.w = int(self.get_parameter('frame_width').value)
         self.h = int(self.get_parameter('frame_height').value)
         self.hsv_file = self.get_parameter('hsv_file').value
@@ -111,18 +117,46 @@ class LineTrack(Node):
             out_clamp=float(self.get_parameter('angular_max').value),
         )
 
-        self.cap = cv.VideoCapture(self.cam_index)
-        if not self.cap.isOpened():
-            self.get_logger().error(f'cannot open camera index {self.cam_index}')
-            raise RuntimeError('camera open failed')
-        self.cap.set(cv.CAP_PROP_FRAME_WIDTH, self.w)
-        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, self.h)
+        # Image source: a ROS topic (simulation / external driver) or a local
+        # camera opened directly with OpenCV (real USB camera).
+        self.cap = None
+        self._frame = None
+        self._bridge = None
+        if self.image_topic:
+            from cv_bridge import CvBridge
+            self._bridge = CvBridge()
+            self.sub_image = self.create_subscription(
+                Image, self.image_topic, self._on_image, 10)
+            self.get_logger().info(
+                f'reading frames from image topic "{self.image_topic}"')
+        else:
+            self.cap = cv.VideoCapture(self.cam_index)
+            if not self.cap.isOpened():
+                self.get_logger().error(
+                    f'cannot open camera index {self.cam_index}')
+                raise RuntimeError('camera open failed')
+            self.cap.set(cv.CAP_PROP_FRAME_WIDTH, self.w)
+            self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, self.h)
 
         if self.show:
             cv.namedWindow(WINDOW, cv.WINDOW_AUTOSIZE)
 
         self.timer = self.create_timer(0.03, self._tick)
         self._t_prev = time.time()
+
+    def _on_image(self, msg):
+        try:
+            self._frame = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f'cv_bridge convert failed: {exc}')
+
+    def _grab(self):
+        """Return (ok, frame) from whichever image source is configured."""
+        if self.cap is not None:
+            return self.cap.read()
+        if self._frame is None:
+            return False, None
+        return True, self._frame
 
     def _on_joy(self, msg):
         self.joy_active = bool(msg.data)
@@ -150,8 +184,8 @@ class LineTrack(Node):
         self.pid.out_clamp = float(self.get_parameter('angular_max').value)
 
     def _tick(self):
-        ok, frame = self.cap.read()
-        if not ok:
+        ok, frame = self._grab()
+        if not ok or frame is None:
             return
         frame = cv.resize(frame, (self.w, self.h))
         self._refresh_params()
@@ -219,7 +253,8 @@ class LineTrack(Node):
     def _shutdown(self):
         try:
             self.pub_cmd.publish(Twist())
-            self.cap.release()
+            if self.cap is not None:
+                self.cap.release()
             if self.show:
                 cv.destroyAllWindows()
         finally:

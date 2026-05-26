@@ -38,7 +38,28 @@ yahboomcar_linefollow/
 
 - `rclpy`, `std_msgs`, `geometry_msgs`, `sensor_msgs`
 - `cv_bridge`, `opencv-python` (`cv2`)
-- 一个可被 OpenCV 打开的 USB 摄像头（`camera_index` 参数）
+- 图像来源二选一：
+  - 一个可被 OpenCV 打开的 USB 摄像头（`camera_index` 参数，默认）；
+  - 或一个 `sensor_msgs/Image` 话题（`image_topic` 参数，例如 Gazebo 仿真的
+    `/camera/image_raw`）。
+
+## 图像来源（USB vs ROS 话题）
+
+`line_track` 新增 `image_topic` 参数：
+
+| `image_topic` | 行为 |
+|---|---|
+| `''`（空，默认） | 走原有逻辑，用 `cv.VideoCapture(camera_index)` 开本地 USB 摄像头 |
+| 非空（如 `/camera/image_raw`） | 改为订阅该 ROS 话题（cv_bridge 转 `bgr8`），不打开本地摄像头 |
+
+这样同一个节点既能跑真车的 USB 摄像头，也能跑 Gazebo 仿真相机。仿真一键启动见
+`yahboomcar_gazebo` 包的 `line_follow_sim.launch.py`。
+
+```bash
+# 仿真：从 Gazebo 相机话题取图
+ros2 run yahboomcar_linefollow line_track --ros-args \
+    -p image_topic:=/camera/image_raw -p show_window:=false
+```
 
 ## 使用
 

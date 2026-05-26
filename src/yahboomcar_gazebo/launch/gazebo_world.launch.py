@@ -55,6 +55,7 @@ def generate_launch_description():
     yaw = LaunchConfiguration('yaw')
     scene = LaunchConfiguration('scene')
     gui = LaunchConfiguration('gui')
+    camera_pitch = LaunchConfiguration('camera_pitch')
 
     args = [
         DeclareLaunchArgument('world', default_value=default_world,
@@ -70,6 +71,9 @@ def generate_launch_description():
                               description='Scene spawned on startup '
                                           '(name from config/scenes.yaml, '
                                           '"" = none)'),
+        DeclareLaunchArgument('camera_pitch', default_value='0.0',
+                              description='Downward pitch (rad) of the camera '
+                                          'sensor; use ~0.6 for line follow'),
     ]
 
     gzserver = IncludeLaunchDescription(
@@ -84,7 +88,8 @@ def generate_launch_description():
     )
 
     robot_description = ParameterValue(
-        Command(['xacro ', xacro_file]), value_type=str)
+        Command(['xacro ', xacro_file, ' camera_pitch:=', camera_pitch]),
+        value_type=str)
 
     robot_state_publisher = Node(
         package='robot_state_publisher',

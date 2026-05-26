@@ -20,7 +20,8 @@ setup(
         (os.path.join('share', package_name, 'urdf'),
             glob(os.path.join('urdf', '*'))),
         (os.path.join('share', package_name, 'config'),
-            glob(os.path.join('config', '*.yaml'))),
+            glob(os.path.join('config', '*.yaml'))
+            + glob(os.path.join('config', '*.txt'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

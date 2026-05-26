@@ -18,14 +18,17 @@ Yahboomcar X3（麦克纳姆轮）在 **Gazebo Classic** 下的仿真包，包�
 yahboomcar_gazebo/
 ├── launch/
 │   ├── gazebo_world.launch.py   # 一键启动：Gazebo + 世界 + 机器人 + 场景切换
+│   ├── line_follow_sim.launch.py # 仿真巡线：轨道世界 + 相机俯视 + line_track
 │   └── spawn_robot.launch.py    # 仅把机器人 spawn 进已运行的 Gazebo
 ├── worlds/
 │   ├── yahboom_room.world        # 默认世界：6x6 墙体 + 桌子 + 立柱（内置几何体，离线可用）
+│   ├── yahboom_line.world        # 巡线世界：地面上一条黄色曲线
 │   └── yahboom_base.world        # 极简画布：仅地面 + 光源，配合场景切换使用
 ├── urdf/
-│   └── yahboomcar_X3_gazebo.urdf.xacro   # X3 + Gazebo 插件（复用 description 的网格）
+│   └── yahboomcar_X3_gazebo.urdf.xacro   # X3 + Gazebo 插件（含 camera_pitch 参数）
 ├── config/
-│   └── scenes.yaml               # 各场景的模型与位姿定义
+│   ├── scenes.yaml               # 各场景的模型与位姿定义
+│   └── line_hsv_sim.txt          # 仿真黄线的 HSV 阈值
 └── yahboomcar_gazebo/
     └── scene_switcher.py         # 场景切换节点
 ```
@@ -65,6 +68,25 @@ ros2 run yahboomcar_ctrl yahboom_keyboard
 
 机器人订阅 `/cmd_vel`，发布 `/odom`、`/scan`、`/imu/data`、`/camera/image_raw`，
 并广播 `odom → base_footprint` TF。
+
+## 仿真巡线
+
+在仿真里跑 `yahboomcar_linefollow` 的巡线。`line_follow_sim.launch.py` 会启动巡线
+世界（地面一条黄色曲线）、把相机向下俯 `camera_pitch:=0.6`，并启动 `line_track`，
+通过新增的 `image_topic` 参数从 **`/camera/image_raw`** 取图（而非 USB 摄像头）。
+
+```bash
+ros2 launch yahboomcar_gazebo line_follow_sim.launch.py
+# 调速 / 显示调试窗口（需有显示）
+ros2 launch yahboomcar_gazebo line_follow_sim.launch.py linear:=0.15 show_window:=true
+```
+
+机器人会沿黄线行驶，`line_track` 在画面下方 ROI 提取线条质心、PID 输出 `/cmd_vel`。
+黄线颜色阈值在 `config/line_hsv_sim.txt`；换线颜色时改这里即可。
+
+> 已在容器中用软件 GL（`xvfb` + `LIBGL_ALWAYS_SOFTWARE=1`）headless 跑通：相机出图、
+> 巡线节点每帧都能识别到线、机器人沿曲线行驶（跟踪误差约几厘米）。无 GPU 时相机渲染
+> 较慢（~3Hz），有 GPU/GUI 会流畅很多。
 
 ## 场景切换
 
