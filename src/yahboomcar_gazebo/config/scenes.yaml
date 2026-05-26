@@ -1,0 +1,39 @@
+# Scene definitions for the scene_switcher node.
+#
+# Each scene is a named list of Gazebo built-in (model database / Fuel)
+# models. The node spawns them via /spawn_entity and removes the previous
+# scene via /delete_entity, so you can hot-swap environments at runtime
+# without restarting Gazebo:
+#
+#   ros2 topic pub --once /scene_cmd std_msgs/String "data: warehouse"
+#   ros2 service call /scene/next  std_srvs/srv/Trigger
+#   ros2 service call /scene/clear std_srvs/srv/Trigger
+#
+# pose = [x, y, z, roll, pitch, yaw]  (metres / radians, in the world frame)
+
+scenes:
+
+  office:
+    - {model: cafe_table,        pose: [2.0,  0.0, 0.0, 0.0, 0.0, 0.0]}
+    - {model: cafe_table,        pose: [2.0,  2.0, 0.0, 0.0, 0.0, 0.0]}
+    - {model: bookshelf,         pose: [3.5,  1.0, 0.0, 0.0, 0.0, 1.5707963]}
+    - {model: cardboard_box,     pose: [1.2, -1.2, 0.0, 0.0, 0.0, 0.0]}
+
+  warehouse:
+    - {model: bookshelf,         pose: [2.5,  1.2, 0.0, 0.0, 0.0, 0.0]}
+    - {model: bookshelf,         pose: [2.5, -1.2, 0.0, 0.0, 0.0, 0.0]}
+    - {model: cardboard_box,     pose: [3.5,  0.0, 0.0, 0.0, 0.0, 0.0]}
+    - {model: cardboard_box,     pose: [4.0,  0.6, 0.0, 0.0, 0.0, 0.0]}
+    - {model: cardboard_box,     pose: [4.0, -0.6, 0.0, 0.0, 0.0, 0.0]}
+
+  obstacles:
+    - {model: construction_cone,    pose: [1.5,  0.6, 0.0, 0.0, 0.0, 0.0]}
+    - {model: construction_cone,    pose: [1.5, -0.6, 0.0, 0.0, 0.0, 0.0]}
+    - {model: construction_cone,    pose: [2.5,  0.0, 0.0, 0.0, 0.0, 0.0]}
+    - {model: construction_barrel,  pose: [3.5,  0.8, 0.0, 0.0, 0.0, 0.0]}
+    - {model: construction_barrel,  pose: [3.5, -0.8, 0.0, 0.0, 0.0, 0.0]}
+
+  parking:
+    - {model: jersey_barrier,    pose: [2.0,  1.5, 0.0, 0.0, 0.0, 0.0]}
+    - {model: jersey_barrier,    pose: [2.0, -1.5, 0.0, 0.0, 0.0, 0.0]}
+    - {model: jersey_barrier,    pose: [4.0,  0.0, 0.0, 0.0, 0.0, 1.5707963]}

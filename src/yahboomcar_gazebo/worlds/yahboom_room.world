@@ -1,0 +1,73 @@
+<?xml version="1.0" ?>
+<!--
+  Yahboomcar X3 demo room, assembled entirely from Gazebo's built-in
+  (model database / Fuel) models so it works out of the box once the
+  standard gazebo model set is available.
+  Perimeter is built from `grey_wall`; furniture/obstacles use
+  cafe_table, bookshelf, construction_cone, construction_barrel, etc.
+-->
+<sdf version="1.6">
+  <world name="yahboom_room">
+
+    <!-- lighting + ground -->
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- ~8m x 8m perimeter built from grey_wall segments (each wall is ~7.5m long) -->
+    <include>
+      <name>wall_north</name>
+      <pose>0 4 0 0 0 0</pose>
+      <uri>model://grey_wall</uri>
+    </include>
+    <include>
+      <name>wall_south</name>
+      <pose>0 -4 0 0 0 0</pose>
+      <uri>model://grey_wall</uri>
+    </include>
+    <include>
+      <name>wall_east</name>
+      <pose>4 0 0 0 0 1.5707963</pose>
+      <uri>model://grey_wall</uri>
+    </include>
+    <include>
+      <name>wall_west</name>
+      <pose>-4 0 0 0 0 1.5707963</pose>
+      <uri>model://grey_wall</uri>
+    </include>
+
+    <!-- a little static furniture so the lidar/camera have something to see -->
+    <include>
+      <name>cafe_table_1</name>
+      <pose>2.0 1.5 0 0 0 0</pose>
+      <uri>model://cafe_table</uri>
+    </include>
+    <include>
+      <name>bookshelf_1</name>
+      <pose>-3.0 2.5 0 0 0 1.5707963</pose>
+      <uri>model://bookshelf</uri>
+    </include>
+    <include>
+      <name>cone_1</name>
+      <pose>1.0 -1.5 0 0 0 0</pose>
+      <uri>model://construction_cone</uri>
+    </include>
+    <include>
+      <name>cone_2</name>
+      <pose>-1.5 -2.0 0 0 0 0</pose>
+      <uri>model://construction_cone</uri>
+    </include>
+
+    <physics name="default_physics" default="true" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+  </world>
+</sdf>
