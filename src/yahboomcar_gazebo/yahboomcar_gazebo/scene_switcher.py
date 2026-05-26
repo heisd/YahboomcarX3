@@ -64,6 +64,54 @@ def model_sdf(model_uri):
     ).format(model_uri)
 
 
+def _geometry_xml(item):
+    """Return the SDF <geometry> body for a primitive item, or None."""
+    if 'box' in item:
+        sx, sy, sz = (float(v) for v in item['box'])
+        return '<box><size>{} {} {}</size></box>'.format(sx, sy, sz)
+    if 'cylinder' in item:
+        radius, length = (float(v) for v in item['cylinder'])
+        return ('<cylinder><radius>{}</radius><length>{}</length>'
+                '</cylinder>').format(radius, length)
+    if 'sphere' in item:
+        radius = float(item['sphere'][0])
+        return '<sphere><radius>{}</radius></sphere>'.format(radius)
+    return None
+
+
+def primitive_sdf(name, item):
+    """Build a static-primitive SDF model from a scene item, or None."""
+    geom = _geometry_xml(item)
+    if geom is None:
+        return None
+    color = item.get('color', [0.6, 0.6, 0.6])
+    r, g, b = (float(c) for c in color)
+    return (
+        '<sdf version="1.6">'
+        '<model name="{name}">'
+        '<static>true</static>'
+        '<link name="link">'
+        '<collision name="collision"><geometry>{geom}</geometry></collision>'
+        '<visual name="visual">'
+        '<geometry>{geom}</geometry>'
+        '<material>'
+        '<ambient>{r} {g} {b} 1</ambient>'
+        '<diffuse>{r} {g} {b} 1</diffuse>'
+        '</material>'
+        '</visual>'
+        '</link>'
+        '</model>'
+        '</sdf>'
+    ).format(name=name, geom=geom, r=r, g=g, b=b)
+
+
+def entity_sdf(name, item):
+    """Build the spawnable SDF for a scene item (primitive or model://)."""
+    if 'model' in item:
+        return model_sdf(item['model'])
+    return primitive_sdf(name, item)
+
+
 class SceneSwitcher(Node):
 
     def __init__(self):
@@ -149,10 +197,10 @@ class SceneSwitcher(Node):
             return None
         return future.result()
 
-    def _spawn(self, name, model_uri, pose):
+    def _spawn(self, name, xml, pose):
         req = SpawnEntity.Request()
         req.name = name
-        req.xml = model_sdf(model_uri)
+        req.xml = xml
         req.initial_pose = pose
         req.reference_frame = 'world'
         res = self._call(self._spawn_cli, req)
@@ -216,8 +264,12 @@ class SceneSwitcher(Node):
                     'Scene "{}" item #{} is not a mapping, skipping.'.format(
                         scene_name, idx))
                 continue
-            model_uri = item.get('model')
-            if not model_uri:
+            entity = '{}_{}'.format(scene_name, idx)
+            xml = entity_sdf(entity, item)
+            if xml is None:
+                self.get_logger().warn(
+                    'Scene "{}" item #{} has no model/box/cylinder/sphere, '
+                    'skipping.'.format(scene_name, idx))
                 continue
             pose_vals = item.get('pose', [0.0] * 6)
             pose = Pose()
@@ -230,13 +282,12 @@ class SceneSwitcher(Node):
             pose.orientation.y = qy
             pose.orientation.z = qz
             pose.orientation.w = qw
-            entity = '{}_{}_{}'.format(scene_name, model_uri, idx)
-            if self._spawn(entity, model_uri, pose):
+            if self._spawn(entity, xml, pose):
                 spawned += 1
 
         self._current_scene = scene_name
         self.get_logger().info(
-            'Switched to scene "{}" ({} models).'.format(scene_name, spawned))
+            'Switched to scene "{}" ({} objects).'.format(scene_name, spawned))
         return True
 
     def next_scene(self):

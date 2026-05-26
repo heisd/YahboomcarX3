@@ -10,7 +10,36 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+def _add_model_path():
+    """Make both `model://<pkg>` (robot meshes) and `model://ground_plane`
+    (Gazebo's bundled models) resolve, even if `gazebo/setup.sh` was not
+    sourced.
+
+    sdformat rewrites the URDF's `package://<pkg>/...` mesh paths to
+    `model://<pkg>/...`, so Gazebo needs the parent of each package share
+    directory on GAZEBO_MODEL_PATH or it falls back to the (now dead) online
+    model database and loads the robot without collision meshes (it then
+    free-falls through a missing floor). Mutating os.environ here ensures
+    gazebo_ros' own path computation picks it up.
+    """
+    from glob import glob
+
+    extra = [
+        os.path.dirname(get_package_share_directory('yahboomcar_description')),
+        os.path.dirname(get_package_share_directory('yahboomcar_gazebo')),
+    ]
+    # Gazebo Classic's bundled models (sun, ground_plane, ...).
+    extra += sorted(glob('/usr/share/gazebo-*/models'))
+    extra += glob('/usr/share/gazebo/models')
+    extra.append(os.path.expanduser('~/.gazebo/models'))
+
+    current = os.environ.get('GAZEBO_MODEL_PATH', '')
+    parts = [p for p in [*extra, *current.split(os.pathsep)] if p]
+    os.environ['GAZEBO_MODEL_PATH'] = os.pathsep.join(dict.fromkeys(parts))
+
+
 def generate_launch_description():
+    _add_model_path()
     pkg = get_package_share_directory('yahboomcar_gazebo')
     gazebo_ros = get_package_share_directory('gazebo_ros')
 
