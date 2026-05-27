@@ -119,9 +119,14 @@ class LineTrack(Node):
             self.get_logger().info(
                 f'collision hold-off listening on "{collision_topic}"')
 
-        # QR priority state
-        self.enable_qr = bool(self.get_parameter('enable_qr').value)
-        self._qr = QRReader() if self.enable_qr else None
+        # QR priority state — QRReader is created once; enable_qr is read
+        # live each tick so `ros2 param set /line_track enable_qr false`
+        # takes effect immediately without restarting the node.
+        self._qr = QRReader()
+        if not self._qr.available():
+            self.get_logger().warn(
+                'cv2.QRCodeDetector not available in this OpenCV build -- '
+                'QR priority disabled regardless of enable_qr parameter.')
         self._qr_table = load_actions(
             self.get_parameter('qr_actions_file').value)
         self._qr_state = None          # active maneuver dict, or None
@@ -129,11 +134,12 @@ class LineTrack(Node):
         self._qr_last_payload = None
         self._qr_cooldown_until = self.get_clock().now()
         self.pub_qr = self.create_publisher(String, '~/qr', 10)
-        if self.enable_qr:
-            n = len(self._qr_table.get('actions', {}))
-            self.get_logger().info(
-                f'QR priority enabled -- {n} action(s) loaded from '
-                f'{self.get_parameter("qr_actions_file").value}')
+        n = len(self._qr_table.get('actions', {}))
+        self.get_logger().info(
+            f'QR reader {"ready" if self._qr.available() else "unavailable"}'
+            f' -- {n} action(s) from '
+            f'{self.get_parameter("qr_actions_file").value} '
+            f'(enable_qr={self.get_parameter("enable_qr").value})')
 
         self.pid = SimplePID(
             kp=float(self.get_parameter('kp').value),
@@ -187,7 +193,6 @@ class LineTrack(Node):
     def _start_qr_maneuver(self, payload, action):
         """Latch a resolved fork-road action as the active maneuver."""
         a_type = action['type']
-        now = self.get_clock().now()
         state = {'type': a_type, 'payload': payload}
 
         if a_type in ('left', 'right'):
@@ -305,7 +310,9 @@ class LineTrack(Node):
             self._qr_state = None
 
         # QR priority: scan the frame and (re)arm a fork-road maneuver.
-        if self.enable_qr and self._qr is not None and not manual_or_safety:
+        # enable_qr is re-read every tick so `ros2 param set` takes effect live.
+        enable_qr = bool(self.get_parameter('enable_qr').value)
+        if enable_qr and self._qr is not None and not manual_or_safety:
             self._maybe_detect_qr(frame, now)
 
         qr_label = ''

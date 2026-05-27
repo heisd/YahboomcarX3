@@ -37,17 +37,28 @@ class QRReader:
     detect() returns (payload, points) where payload is the decoded text
     (str) or None when nothing is found, and points are the 4 corner pts
     (or None) for optional overlay drawing.
+
+    If the running OpenCV build does not include QR support
+    (cv2.QRCodeDetector absent), the constructor sets self._det = None and
+    detect() always returns (None, None) so the rest of the pipeline
+    degrades gracefully rather than crashing.
     """
 
     def __init__(self):
-        self._det = cv.QRCodeDetector()
+        try:
+            self._det = cv.QRCodeDetector()
+        except AttributeError:
+            self._det = None
+
+    def available(self):
+        return self._det is not None
 
     def detect(self, bgr_frame):
-        if bgr_frame is None:
+        if bgr_frame is None or self._det is None:
             return None, None
         try:
             payload, points, _ = self._det.detectAndDecode(bgr_frame)
-        except cv.error:
+        except (cv.error, Exception):
             return None, None
         if not payload:
             return None, points

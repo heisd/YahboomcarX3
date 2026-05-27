@@ -63,6 +63,11 @@ class QRCheck(Node):
             f'loaded {n} QR action(s) from {actions_file}')
 
         self.qr = QRReader()
+        if not self.qr.available():
+            self.get_logger().error(
+                'cv2.QRCodeDetector not available in this OpenCV build. '
+                'Install opencv-python >= 3.0 or rebuild OpenCV with QR support.')
+            raise RuntimeError('QRCodeDetector not available')
         self.pub_payload = self.create_publisher(String, '~/payload', 10)
         self.pub_action = self.create_publisher(String, '~/action', 10)
 
