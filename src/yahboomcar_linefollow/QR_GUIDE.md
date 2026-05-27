@@ -258,3 +258,116 @@ pytest src/yahboomcar_linefollow/test/test_qr_state_machine.py -v
 覆盖范围：`resolve_action` 解析（字符串键 / 内联 JSON / 默认值合并 / 非法类型）、
 `load_actions` 容错（缺文件 / 坏 JSON）、以及左右转定时到期、站点锁存与定时恢复、
 冷却去重、新码唤醒锁存站点等状态转移。
+
+---
+
+## 六、如何制作（生成）二维码：用什么工具
+
+本系统用 OpenCV 自带的 `cv2.QRCodeDetector` 读码，所以你只要生成**标准二维码**即可，
+**不限定**用哪个工具。关键是二维码里**编码的文本**必须和系统约定一致：
+
+- **纯字符串键**：和 `params/qr_actions.json` 里 `actions` 的键**完全一致**
+  （区分大小写），例如 `FORK_LEFT`、`FORK_RIGHT`、`STATION_A`、`STOP`；
+- **或内联 JSON**：例如 `{"type":"right","turn_time":2.0}`（必须以 `{` 开头）。
+
+下面给出三类常用工具。
+
+### 工具 A：Python `qrcode` 库（推荐，可批量）
+
+安装：
+
+```bash
+pip install "qrcode[pil]"
+```
+
+生成单张：
+
+```bash
+# 生成一张内容为 FORK_LEFT 的二维码图片
+python3 -c "import qrcode; qrcode.make('FORK_LEFT').save('FORK_LEFT.png')"
+```
+
+**批量生成 `qr_actions.json` 里所有键**（最实用，贴码标定一次到位）。把下面存成
+`make_qrs.py` 跑一遍，会在 `qr_codes/` 目录下为每个动作键生成一张 PNG：
+
+```python
+#!/usr/bin/env python3
+"""读取 qr_actions.json，为每个动作键生成一张二维码 PNG。"""
+import json
+import os
+import qrcode
+
+ACTIONS = os.path.join(
+    os.path.dirname(__file__), 'params', 'qr_actions.json')
+OUT = os.path.join(os.path.dirname(__file__), 'qr_codes')
+
+os.makedirs(OUT, exist_ok=True)
+with open(ACTIONS) as f:
+    table = json.load(f)
+
+for key in table.get('actions', {}):
+    qr = qrcode.QRCode(
+        version=None,                 # 自动选最小版本
+        error_correction=qrcode.constants.ERROR_CORRECT_M,  # 容错 ~15%
+        box_size=10,                  # 每个点 10 像素
+        border=4,                     # 静区(quiet zone) >= 4 个点，必须留够
+    )
+    qr.add_data(key)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    path = os.path.join(OUT, f'{key}.png')
+    img.save(path)
+    print('wrote', path)
+```
+
+运行：
+
+```bash
+cd src/yahboomcar_linefollow
+python3 make_qrs.py
+# → 在 qr_codes/ 下得到 FORK_LEFT.png、FORK_RIGHT.png、STATION_A.png ...
+```
+
+> 想生成内联 JSON 码，把 `qr.add_data(key)` 换成
+> `qr.add_data('{"type":"right","turn_time":2.0}')` 即可。
+
+### 工具 B：`qrencode` 命令行（无需写代码）
+
+安装（Ubuntu）：
+
+```bash
+sudo apt install qrencode
+```
+
+生成：
+
+```bash
+# 纯字符串键
+qrencode -o FORK_LEFT.png -s 10 -m 4 "FORK_LEFT"
+
+# 内联 JSON（注意整段用单引号包住）
+qrencode -o turn_right.png -s 10 -m 4 '{"type":"right","turn_time":2.0}'
+```
+
+- `-s 10`：每个点 10 像素（放大尺寸）；
+- `-m 4`：静区 4 个点（留白边，识别更稳）。
+
+### 工具 C：在线生成器
+
+任意"QR Code Generator"网站，把文本（如 `FORK_LEFT`）粘进去导出 PNG 即可。
+
+> 注意：本系统的二维码内容只是动作关键字 / 简单 JSON，**不含任何敏感信息**，用在线
+> 工具没有泄密风险。但如果以后你往二维码里塞了私密内容，就别用第三方在线网站
+> （内容可能被缓存 / 索引），改用本地的工具 A / B。
+
+### 打印与张贴建议（保证识别率）
+
+`cv2.QRCodeDetector` 对清晰、平整、对比度高的码识别最好：
+
+- **留足静区（白边）**：四周至少 4 个点宽的白边，别贴到边缘被裁掉；
+- **够大**：按拍摄距离选尺寸，常见 4–8 cm 边长；越远越要大；
+- **黑白对比**：白底黑码，别用彩色 / 反色；
+- **哑光纸**：用哑光（不反光）纸或贴膜，避免强光下高光盖住码；
+- **贴平**：贴在平整地面 / 立牌上，别起皱或弯折；
+- **先验证再上路**：贴好后用诊断节点 `ros2 run yahboomcar_linefollow qr_check`
+  对着每张码确认能解出对应动作（见"三、2"），再跑巡线。
