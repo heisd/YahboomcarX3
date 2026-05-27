@@ -35,8 +35,11 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Twist
+
+from std_msgs.msg import Bool, String
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
+
+
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -47,6 +50,7 @@ from .line_common import (
     count_blobs,
     SimplePID,
 )
+from .qr_common import QRReader, load_actions, resolve_action
 
 WINDOW = 'line_track'
 
@@ -55,6 +59,12 @@ def _default_hsv_path():
     return os.path.join(
         get_package_share_directory('yahboomcar_linefollow'),
         'params', 'HSV.txt')
+
+
+def _default_qr_actions_path():
+    return os.path.join(
+        get_package_share_directory('yahboomcar_linefollow'),
+        'params', 'qr_actions.json')
 
 
 class LineTrack(Node):
@@ -84,6 +94,15 @@ class LineTrack(Node):
                                '/collision_detector/collision')
         self.declare_parameter('collision_pause_sec', 2.0)
 
+        # QR priority: scan the same frame for a QR code; when one resolves to
+        # a fork-road action, interrupt line following and execute it. The QR
+        # maneuver outranks normal line following but yields to the manual
+        # joystick override and the collision safety stop.
+        self.declare_parameter('enable_qr', True)
+        self.declare_parameter('qr_actions_file', _default_qr_actions_path())
+        self.declare_parameter('qr_check_every', 3)      # run detect every N ticks
+        self.declare_parameter('qr_cooldown_sec', 4.0)   # ignore same payload again
+
         self.cam_index = self.get_parameter('camera_index').value
         self.image_topic = str(self.get_parameter('image_topic').value)
         self.w = int(self.get_parameter('frame_width').value)
@@ -111,6 +130,28 @@ class LineTrack(Node):
                 Bool, collision_topic, self._on_collision, 10)
             self.get_logger().info(
                 f'collision hold-off listening on "{collision_topic}"')
+
+        # QR priority state — QRReader is created once; enable_qr is read
+        # live each tick so `ros2 param set /line_track enable_qr false`
+        # takes effect immediately without restarting the node.
+        self._qr = QRReader()
+        if not self._qr.available():
+            self.get_logger().warn(
+                'cv2.QRCodeDetector not available in this OpenCV build -- '
+                'QR priority disabled regardless of enable_qr parameter.')
+        self._qr_table = load_actions(
+            self.get_parameter('qr_actions_file').value)
+        self._qr_state = None          # active maneuver dict, or None
+        self._qr_tick = 0
+        self._qr_last_payload = None
+        self._qr_cooldown_until = self.get_clock().now()
+        self.pub_qr = self.create_publisher(String, '~/qr', 10)
+        n = len(self._qr_table.get('actions', {}))
+        self.get_logger().info(
+            f'QR reader {"ready" if self._qr.available() else "unavailable"}'
+            f' -- {n} action(s) from '
+            f'{self.get_parameter("qr_actions_file").value} '
+            f'(enable_qr={self.get_parameter("enable_qr").value})')
 
         self.pid = SimplePID(
             kp=float(self.get_parameter('kp').value),
@@ -185,6 +226,96 @@ class LineTrack(Node):
         self.get_logger().warn(
             f'collision flag received -- pausing line-follow for {pause:.1f}s')
 
+    def _after(self, seconds):
+        dt = rclpy.duration.Duration(
+            seconds=int(seconds),
+            nanoseconds=int((seconds % 1) * 1e9))
+        return self.get_clock().now() + dt
+
+    def _publish_qr(self, text):
+        self.pub_qr.publish(String(data=text))
+
+    def _start_qr_maneuver(self, payload, action):
+        """Latch a resolved fork-road action as the active maneuver."""
+        a_type = action['type']
+        state = {'type': a_type, 'payload': payload}
+
+        if a_type in ('left', 'right'):
+            state['until'] = self._after(float(action.get('turn_time', 1.2)))
+            state['turn_speed'] = float(action.get('turn_speed', 0.6))
+            state['cross_speed'] = float(action.get('cross_speed', 0.12))
+        elif a_type == 'straight':
+            state['until'] = self._after(float(action.get('cross_time', 0.6)))
+            state['cross_speed'] = float(action.get('cross_speed', 0.12))
+        else:  # station / stop
+            hold = float(action.get('hold_time', 0.0))
+            # hold_time <= 0 latches the stop until 'switch' is toggled.
+            state['until'] = self._after(hold) if hold > 0 else None
+
+        self._qr_state = state
+        self.pid.reset()
+        self._qr_last_payload = payload
+        self._qr_cooldown_until = self._after(
+            float(self.get_parameter('qr_cooldown_sec').value))
+        self.get_logger().info(f'QR "{payload}" -> {a_type} maneuver')
+        self._publish_qr(f'{payload}:{a_type}')
+
+    def _qr_maneuver_twist(self):
+        """Return (twist, still_active) for the active QR maneuver.
+
+        still_active is False once the maneuver is done; the caller then
+        clears self._qr_state and resumes line following.
+        """
+        st = self._qr_state
+        a_type = st['type']
+
+        if a_type in ('station', 'stop'):
+            if st['until'] is None:
+                # Latched: stay stopped. Toggling 'switch' off clears the latch.
+                if not bool(self.get_parameter('switch').value):
+                    return Twist(), False
+                return Twist(), True
+            if self.get_clock().now() >= st['until']:
+                return Twist(), False
+            return Twist(), True
+
+        # left / right / straight are timed open-loop moves.
+        if self.get_clock().now() >= st['until']:
+            return Twist(), False
+        twist = Twist()
+        twist.linear.x = st['cross_speed']
+        if a_type == 'left':
+            twist.angular.z = st['turn_speed']
+        elif a_type == 'right':
+            twist.angular.z = -st['turn_speed']
+        return twist, True
+
+    def _maybe_detect_qr(self, frame, now):
+        # Skip detection while a timed turn is running so the same code can't
+        # retrigger mid-maneuver; a latched stop keeps scanning so a fresh code
+        # can redirect / resume the car.
+        timed_active = (self._qr_state is not None
+                        and self._qr_state.get('until') is not None)
+        if timed_active:
+            return
+        self._qr_tick += 1
+        every = max(1, int(self.get_parameter('qr_check_every').value))
+        if self._qr_tick % every != 0:
+            return
+        payload, _pts = self._qr.detect(frame)
+        if not payload:
+            return
+        if payload == self._qr_last_payload and now < self._qr_cooldown_until:
+            return
+        action = resolve_action(payload, self._qr_table)
+        if action is None:
+            self.get_logger().warn(f'QR "{payload}" has no matching action')
+            self._qr_last_payload = payload
+            self._qr_cooldown_until = self._after(
+                float(self.get_parameter('qr_cooldown_sec').value))
+            return
+        self._start_qr_maneuver(payload, action)
+
     def _refresh_params(self):
         self.pid.kp = float(self.get_parameter('kp').value)
         self.pid.ki = float(self.get_parameter('ki').value)
@@ -236,14 +367,42 @@ class LineTrack(Node):
                 throttle_duration_sec=2.0)
 
         twist = Twist()
-        in_collision_hold = self.get_clock().now() < self._collision_hold_until
-        enabled = (bool(self.get_parameter('switch').value)
-                   and not self.joy_active
-                   and not in_collision_hold)
+        now = self.get_clock().now()
+        in_collision_hold = now < self._collision_hold_until
+        switch_on = bool(self.get_parameter('switch').value)
+        manual_or_safety = self.joy_active or in_collision_hold
         linear = float(self.get_parameter('linear').value)
         if in_collision_hold:
             self.pid.reset()
 
+
+        # Manual override or the safety stop cancel any QR maneuver in flight.
+        if manual_or_safety and self._qr_state is not None:
+            self._qr_state = None
+
+        # QR priority: scan the frame and (re)arm a fork-road maneuver.
+        # enable_qr is re-read every tick so `ros2 param set` takes effect live.
+        enable_qr = bool(self.get_parameter('enable_qr').value)
+        if enable_qr and self._qr is not None and not manual_or_safety:
+            self._maybe_detect_qr(frame, now)
+
+        qr_label = ''
+        if self._qr_state is not None and not manual_or_safety:
+            # The QR maneuver owns /cmd_vel; the line PID is bypassed this tick.
+            twist, still = self._qr_maneuver_twist()
+            qr_label = self._qr_state['type']
+            if not still:
+                self.get_logger().info(
+                    f'QR {qr_label} maneuver done -- resume line follow')
+                self._publish_qr('resume')
+                self._qr_state = None
+                self.pid.reset()
+        elif centroid is not None:
+            cx, cy, _area, cnt = centroid
+            # normalized lateral error in [-1, 1]; positive = line is to the right
+            err = (cx - self.w / 2.0) / (self.w / 2.0)
+            ang = self.pid.step(err)
+            enabled = switch_on and not manual_or_safety
         # Explain (throttled) why we are not driving, so a "stuck" robot is
         # diagnosable from the logs.
         if not enabled:
@@ -299,6 +458,9 @@ class LineTrack(Node):
                 cv.putText(frame, 'no line', (10, 20),
                            cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
+        if self.show and qr_label:
+            cv.putText(frame, f'QR: {qr_label}', (10, 80),
+                       cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
         if self.show and in_collision_hold:
             cv.putText(frame, 'COLLISION HOLD', (10, 60),
                        cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)

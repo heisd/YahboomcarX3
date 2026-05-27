@@ -1,0 +1,18 @@
+{
+  "_comment": "QR payload -> fork-road action. The decoded QR text is looked up as a key in 'actions'. Alternatively the QR may directly encode a JSON object with the same fields. type: left|right|straight|station|stop. turn_speed rad/s, turn_time s, cross_speed m/s, cross_time s, hold_time s (<=0 = latch / stay stopped until line_track 'switch' is toggled).",
+  "defaults": {
+    "turn_speed": 0.6,
+    "turn_time": 1.2,
+    "cross_speed": 0.12,
+    "cross_time": 0.6,
+    "hold_time": 0.0
+  },
+  "actions": {
+    "FORK_LEFT":   {"type": "left"},
+    "FORK_RIGHT":  {"type": "right"},
+    "FORK_STRAIGHT": {"type": "straight"},
+    "STATION_A":   {"type": "station"},
+    "STATION_B":   {"type": "station", "hold_time": 5.0},
+    "STOP":        {"type": "stop"}
+  }
+}

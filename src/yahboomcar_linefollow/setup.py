@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
             'line_detect = yahboomcar_linefollow.line_detect:main',
             'line_track  = yahboomcar_linefollow.line_track:main',
+            'qr_check    = yahboomcar_linefollow.qr_check:main',
         ],
     },
 )
