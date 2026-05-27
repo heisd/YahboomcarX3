@@ -83,6 +83,16 @@ def mask_with_hsv(bgr_img, hsv_range, blur=5, kernel=5):
     return mask
 
 
+def count_blobs(binary_mask, min_area=200):
+    """Number of contours at/above min_area -- >1 means the HSV range is
+    matching more than one line (e.g. two colours), a common cause of the
+    robot jumping between lines."""
+    found = cv.findContours(binary_mask, cv.RETR_EXTERNAL,
+                            cv.CHAIN_APPROX_SIMPLE)
+    contours = found[1] if len(found) == 3 else found[0]
+    return sum(1 for c in contours if cv.contourArea(c) >= min_area)
+
+
 def largest_contour_centroid(binary_mask, min_area=200):
     """Return (cx, cy, area, contour) for the largest blob, or None."""
     found = cv.findContours(binary_mask, cv.RETR_EXTERNAL,
