@@ -4,31 +4,31 @@ public:
     float kp;
     float ki;
     float kd;
-    float targetpoint;
-    // ÉÏÒ»´ÎµÄÎó²î
+    float targetpoint = 0.0f;
+    // ï¿½ï¿½Ò»ï¿½Îµï¿½ï¿½ï¿½ï¿½
     //Last time error
-    float prevError;
-    // »ý·Ö
+    float prevError = 0.0f;
+    // ï¿½ï¿½ï¿½ï¿½
     //integral
-    float intergral;
-    // Î¢·Ö
+    float intergral = 0.0f;
+    // Î¢ï¿½ï¿½
     //differential
-    float derivative;
+    float derivative = 0.0f;
 
     PID(float kp, float ki, float kd);
 
     void Set_PID(float kp, float ki, float kd);
 
     /**
-     * pid calculation function pidµÄ¼ÆËãº¯Êý
-     * @param target  Ä¿±êÖµ
-     * @param current µ±Ç°Öµ
+     * pid calculation function pidï¿½Ä¼ï¿½ï¿½ãº¯ï¿½ï¿½
+     * @param target  Ä¿ï¿½ï¿½Öµ
+     * @param current ï¿½ï¿½Ç°Öµ
      * @return  pwm
      */
     float compute(float target, float current);
 
     /**
-     *  ÖØÖÃËùÓÐµÄÎó²î: µ±ÉèÖÃµÄËÙ¶È ºÍ ÉÏÒ»´Î²»Ò»Ñù
+     *  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ðµï¿½ï¿½ï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½ï¿½Ãµï¿½ï¿½Ù¶ï¿½ ï¿½ï¿½ ï¿½ï¿½Ò»ï¿½Î²ï¿½Ò»ï¿½ï¿½
      *  Reset all errors: When the set speed is different from the last time
      */
     void reset();

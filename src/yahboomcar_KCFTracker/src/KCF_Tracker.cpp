@@ -177,12 +177,8 @@ bool ImageConverter::redetect(const cv::Mat &bgr, cv::Rect &found) {
 
 void ImageConverter::Cancel() {
     this->Reset();
-    
-    delete RGB_WINDOW;
-    delete DEPTH_WINDOW;
-    //delete this->linear_PID;
-    //delete this->angular_PID;
-    
+    // RGB_WINDOW / DEPTH_WINDOW 是字符串字面量(const char*)，绝不能 delete：
+    // 对非 new 得到的指针 delete 是未定义行为，原代码按 'q'/ESC 即崩溃。
     destroyWindow(RGB_WINDOW);
     vel_pub_->publish(geometry_msgs::msg::Twist());
 //        destroyWindow(DEPTH_WINDOW);
@@ -324,11 +320,21 @@ void ImageConverter::depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
         std::cout<<"center_x: "<<center_x<<std::endl;
         int center_y = (int)(result.y + result.height / 2);
         std::cout<<"center_y: "<<center_y<<std::endl;
-        dist_val[0] = depthimage.at<float>(center_y - 5, center_x - 5)/1000.0;
-        dist_val[1] = depthimage.at<float>(center_y - 5, center_x + 5)/1000.0;
-        dist_val[2] = depthimage.at<float>(center_y + 5, center_x + 5)/1000.0;
-        dist_val[3] = depthimage.at<float>(center_y + 5, center_x - 5)/1000.0;
-        dist_val[4] = depthimage.at<float>(center_y, center_x);
+        if (depthimage.empty() || depthimage.cols < 12 || depthimage.rows < 12) {
+            vel_pub_->publish(geometry_msgs::msg::Twist());
+            waitKey(1);
+            return;
+        }
+        // 把采样点夹到有效范围，避免目标贴边时 at<float> 越界(未定义行为/崩溃)。
+        int sx = std::min(std::max(center_x, 5), depthimage.cols - 6);
+        int sy = std::min(std::max(center_y, 5), depthimage.rows - 6);
+        dist_val[0] = depthimage.at<float>(sy - 5, sx - 5)/1000.0;
+        dist_val[1] = depthimage.at<float>(sy - 5, sx + 5)/1000.0;
+        dist_val[2] = depthimage.at<float>(sy + 5, sx + 5)/1000.0;
+        dist_val[3] = depthimage.at<float>(sy + 5, sx - 5)/1000.0;
+        // 中心点同样要除以 1000：原代码漏除导致它与其余四点单位不一致，
+        // 会把平均距离整体带偏(且毫米值常>10被判为无效而丢弃)。
+        dist_val[4] = depthimage.at<float>(sy, sx)/1000.0;
         std::cout<<"dist_val[0]: "<<dist_val[0]<<std::endl;
         std::cout<<"dist_val[1]: "<<dist_val[1]<<std::endl;
         std::cout<<"dist_val[2]: "<<dist_val[2]<<std::endl;
@@ -340,9 +346,9 @@ void ImageConverter::depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
             if (dist_val[i] > 0.4 && dist_val[i] < 10.0) distance += dist_val[i];
             else num_depth_points--;
         }
-        distance /= num_depth_points;
-        std::cout<<distance<<std::endl;
         if (num_depth_points != 0) {
+            distance /= num_depth_points;   // 先判 !=0 再除，避免 5 点全无效时除零
+            std::cout<<distance<<std::endl;
         	std::cout<<"minDist: "<<minDist<<std::endl;
             if (abs(distance - this->minDist) < 0.1) linear_speed = 0;
             else linear_speed = -linear_PID->compute(this->minDist, distance);//-linear_PID->compute(minDist, distance)
