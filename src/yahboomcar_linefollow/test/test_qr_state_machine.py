@@ -293,18 +293,24 @@ class QRStateMachineHarness:
         a_type = action['type']
         state = {'type': a_type, 'payload': payload}
         if a_type in ('left', 'right'):
-            state['until'] = self._after(float(action.get('turn_time', 1.2)))
+            maneuver_sec = float(action.get('turn_time', 1.2))
             state['turn_speed'] = float(action.get('turn_speed', 0.6))
             state['cross_speed'] = float(action.get('cross_speed', 0.12))
         elif a_type == 'straight':
-            state['until'] = self._after(float(action.get('cross_time', 0.6)))
+            maneuver_sec = float(action.get('cross_time', 0.6))
             state['cross_speed'] = float(action.get('cross_speed', 0.12))
         else:
             hold = float(action.get('hold_time', 0.0))
-            state['until'] = self._after(hold) if hold > 0 else None
+            maneuver_sec = hold if hold > 0 else None
+        state['until'] = (self._after(maneuver_sec)
+                          if maneuver_sec is not None else None)
         self._state = state
         self._last_payload = payload
-        self._cooldown_until = self._after(self._cooldown_sec)
+        # Cooldown is counted from when the maneuver finishes, not when it
+        # starts, so a still-visible code cannot retrigger the instant the
+        # hold ends. Mirrors line_track._start_qr_maneuver.
+        self._cooldown_until = self._after(
+            (maneuver_sec or 0.0) + self._cooldown_sec)
         self._log.append(f'START {a_type} payload={payload}')
 
     def _maneuver_twist(self):
@@ -428,12 +434,29 @@ class TestQRStateMachine:
     def test_cooldown_expires_allows_retrigger(self):
         h = self._harness(cooldown_sec=2.0)
         h.tick('FORK_LEFT')
-        h.clock.advance(2.5)   # > cooldown AND > turn_time
+        # Cooldown is counted from the maneuver's end: turn_time(1.2)+cooldown(2.0).
+        h.clock.advance(3.5)   # > turn_time + cooldown
         h.tick()               # drain the timed maneuver
         assert h._state is None
         cmd = h.tick('FORK_LEFT')  # re-trigger after cooldown
         assert h._state is not None
         assert h._state['type'] == 'left'
+
+    def test_visible_station_does_not_retrigger_after_hold(self):
+        # Regression: a station the car is parked on stays in the camera view.
+        # With the cooldown counted from the maneuver's START, it expired
+        # mid-hold (STATION_B hold=5.0 > cooldown=4.0) and the same code
+        # re-armed the instant the hold ended, trapping the car forever.
+        h = self._harness(cooldown_sec=4.0)
+        h.tick('STATION_B')
+        assert h._state is not None
+        h.clock.advance(5.1)            # hold elapsed
+        # Station QR is STILL visible (car has not moved away yet).
+        h.tick('STATION_B')
+        assert h._state is None, 'station re-triggered while still in view'
+        # Still visible next tick, but cooldown keeps it suppressed so the car
+        # resumes normal line following and drives away.
+        assert h.tick('STATION_B') == (0.15, 0.0)
 
     # -- No QR → normal line follow ------------------------------------------
 

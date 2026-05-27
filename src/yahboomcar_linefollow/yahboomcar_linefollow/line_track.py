@@ -240,23 +240,33 @@ class LineTrack(Node):
         a_type = action['type']
         state = {'type': a_type, 'payload': payload}
 
+        # maneuver_sec = how long this maneuver occupies /cmd_vel.
+        # None = a latched stop that stays until 'switch' is toggled.
         if a_type in ('left', 'right'):
-            state['until'] = self._after(float(action.get('turn_time', 1.2)))
+            maneuver_sec = float(action.get('turn_time', 1.2))
             state['turn_speed'] = float(action.get('turn_speed', 0.6))
             state['cross_speed'] = float(action.get('cross_speed', 0.12))
         elif a_type == 'straight':
-            state['until'] = self._after(float(action.get('cross_time', 0.6)))
+            maneuver_sec = float(action.get('cross_time', 0.6))
             state['cross_speed'] = float(action.get('cross_speed', 0.12))
         else:  # station / stop
             hold = float(action.get('hold_time', 0.0))
             # hold_time <= 0 latches the stop until 'switch' is toggled.
-            state['until'] = self._after(hold) if hold > 0 else None
+            maneuver_sec = hold if hold > 0 else None
+
+        state['until'] = (self._after(maneuver_sec)
+                          if maneuver_sec is not None else None)
 
         self._qr_state = state
         self.pid.reset()
         self._qr_last_payload = payload
-        self._qr_cooldown_until = self._after(
-            float(self.get_parameter('qr_cooldown_sec').value))
+        # The cooldown must outlast the maneuver, not start with it: a station
+        # the car is parked on stays in view, so a cooldown timed from the
+        # start (e.g. 4s) expires mid-hold (e.g. 5s) and the same code retriggers
+        # the instant the hold ends -- the car can never leave. Count the
+        # cooldown from when the maneuver finishes.
+        cooldown = float(self.get_parameter('qr_cooldown_sec').value)
+        self._qr_cooldown_until = self._after((maneuver_sec or 0.0) + cooldown)
         self.get_logger().info(f'QR "{payload}" -> {a_type} maneuver')
         self._publish_qr(f'{payload}:{a_type}')
 
