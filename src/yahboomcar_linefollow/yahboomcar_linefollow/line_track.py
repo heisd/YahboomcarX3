@@ -371,10 +371,10 @@ class LineTrack(Node):
         in_collision_hold = now < self._collision_hold_until
         switch_on = bool(self.get_parameter('switch').value)
         manual_or_safety = self.joy_active or in_collision_hold
+        enabled = switch_on and not manual_or_safety
         linear = float(self.get_parameter('linear').value)
         if in_collision_hold:
             self.pid.reset()
-
 
         # Manual override or the safety stop cancel any QR maneuver in flight.
         if manual_or_safety and self._qr_state is not None:
@@ -385,6 +385,18 @@ class LineTrack(Node):
         enable_qr = bool(self.get_parameter('enable_qr').value)
         if enable_qr and self._qr is not None and not manual_or_safety:
             self._maybe_detect_qr(frame, now)
+
+        # Explain (throttled) why we are not driving, so a "stuck" robot is
+        # diagnosable from the logs.
+        if not enabled:
+            if in_collision_hold:
+                reason = 'collision hold-off'
+            elif self.joy_active:
+                reason = 'joystick takeover (/JoyState)'
+            else:
+                reason = 'switch parameter is false'
+            self.get_logger().info(
+                f'not driving: {reason}', throttle_duration_sec=3.0)
 
         qr_label = ''
         if self._qr_state is not None and not manual_or_safety:
@@ -398,24 +410,6 @@ class LineTrack(Node):
                 self._qr_state = None
                 self.pid.reset()
         elif centroid is not None:
-            cx, cy, _area, cnt = centroid
-            # normalized lateral error in [-1, 1]; positive = line is to the right
-            err = (cx - self.w / 2.0) / (self.w / 2.0)
-            ang = self.pid.step(err)
-            enabled = switch_on and not manual_or_safety
-        # Explain (throttled) why we are not driving, so a "stuck" robot is
-        # diagnosable from the logs.
-        if not enabled:
-            if in_collision_hold:
-                reason = 'collision hold-off'
-            elif self.joy_active:
-                reason = 'joystick takeover (/JoyState)'
-            else:
-                reason = 'switch parameter is false'
-            self.get_logger().info(
-                f'not driving: {reason}', throttle_duration_sec=3.0)
-
-        if centroid is not None:
             cx, cy, area, cnt = centroid
             # normalized lateral error in [-1, 1]; positive = line is to the right
             err = (cx - self.w / 2.0) / (self.w / 2.0)
