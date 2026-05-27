@@ -1,0 +1,89 @@
+<?xml version="1.0" ?>
+<!--
+  Seven-colour line picker world. Seven parallel, visual-only floor lines
+  (red/orange/yellow/green/cyan/blue/purple) within the X3 camera's view, so in
+  detect mode you can box-select whichever colour you want, then follow it in
+  track mode (the HSV mask ignores the others). Pair with camera_pitch:=~0.6.
+  Lines are 0.06 m apart in y; pure diffuse colours (no emissive) keep the
+  hues well separated for HSV thresholding.
+-->
+<sdf version="1.6">
+  <world name="yahboom_lines">
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+    <scene><ambient>0.7 0.7 0.7 1</ambient><background>0.7 0.7 0.7 1</background><shadows>false</shadows></scene>
+    <model name="line_red">
+      <static>true</static>
+      <pose>2.6000 -0.1800 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>1.0 0.0 0.0 1</ambient><diffuse>1.0 0.0 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_orange">
+      <static>true</static>
+      <pose>2.6000 -0.1200 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>1.0 0.45 0.0 1</ambient><diffuse>1.0 0.45 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_yellow">
+      <static>true</static>
+      <pose>2.6000 -0.0600 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>1.0 0.95 0.0 1</ambient><diffuse>1.0 0.95 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_green">
+      <static>true</static>
+      <pose>2.6000 0.0000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>0.0 0.8 0.0 1</ambient><diffuse>0.0 0.8 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_cyan">
+      <static>true</static>
+      <pose>2.6000 0.0600 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>0.0 0.8 0.8 1</ambient><diffuse>0.0 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_blue">
+      <static>true</static>
+      <pose>2.6000 0.1200 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>0.1 0.2 1.0 1</ambient><diffuse>0.1 0.2 1.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="line_purple">
+      <static>true</static>
+      <pose>2.6000 0.1800 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>5.000 0.025 0.006</size></box></geometry>
+          <material><ambient>0.6 0.0 0.9 1</ambient><diffuse>0.6 0.0 0.9 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <physics name="default_physics" default="true" type="ode">
+      <max_step_size>0.001</max_step_size><real_time_factor>1.0</real_time_factor><real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+  </world>
+</sdf>

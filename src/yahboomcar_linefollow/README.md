@@ -39,7 +39,28 @@ yahboomcar_linefollow/
 
 - `rclpy`, `std_msgs`, `geometry_msgs`, `sensor_msgs`
 - `cv_bridge`, `opencv-python` (`cv2`)
-- 一个可被 OpenCV 打开的 USB 摄像头（`camera_index` 参数）
+- 图像来源二选一：
+  - 一个可被 OpenCV 打开的 USB 摄像头（`camera_index` 参数，默认）；
+  - 或一个 `sensor_msgs/Image` 话题（`image_topic` 参数，例如 Gazebo 仿真的
+    `/camera/image_raw`）。
+
+## 图像来源（USB vs ROS 话题）
+
+`line_track` 新增 `image_topic` 参数：
+
+| `image_topic` | 行为 |
+|---|---|
+| `''`（空，默认） | 走原有逻辑，用 `cv.VideoCapture(camera_index)` 开本地 USB 摄像头 |
+| 非空（如 `/camera/image_raw`） | 改为订阅该 ROS 话题（cv_bridge 转 `bgr8`），不打开本地摄像头 |
+
+这样同一个节点既能跑真车的 USB 摄像头，也能跑 Gazebo 仿真相机。仿真一键启动见
+`yahboomcar_gazebo` 包的 `line_follow_sim.launch.py`。
+
+```bash
+# 仿真：从 Gazebo 相机话题取图
+ros2 run yahboomcar_linefollow line_track --ros-args \
+    -p image_topic:=/camera/image_raw -p show_window:=false
+```
 
 ## 使用
 
@@ -88,6 +109,29 @@ ros2 param set /line_track linear 0.2
 ros2 param set /line_track switch false      # 临时停车，节点继续运行
 ros2 param set /line_track roi_top_ratio 0.7
 ```
+
+### 调试日志 / 常见问题
+
+`line_track` 内置了一组（限频的）诊断日志，专门用来快速定位巡线"莫名其妙不动 / 乱跑"
+的问题。设 `debug:=true` 还会逐帧打印 `err / cx / area / blobs / ang`。
+
+```bash
+ros2 run yahboomcar_linefollow line_track --ros-args -p debug:=true
+```
+
+| 日志 | 含义 / 排查方向 |
+|---|---|
+| `no frame from <源> ...` | 相机/话题没出图：检查 `camera_index` 或 `image_topic`、相机是否发布 |
+| `no HSV range loaded` | 没加载到 HSV：先跑 detect 或设对 `hsv_file` |
+| `no line detected` | 当前帧 ROI 里找不到线：检查 HSV 阈值 / 光照 / `camera_pitch` / ROI 带位置 |
+| `line lost` | 之前在跟、这一帧丢了：可能转弯过急或速度过快，线滑出视野 |
+| `N blobs in ROI ... 可能匹配多条线/颜色` | HSV 太宽，同时命中多条线（如红/橙/黄相邻色）→ 收紧 `hsv_file` 或缩小 ROI |
+| `line near frame edge (err=...)` | 线快出画面：减速或让相机看更宽/更远 |
+| `not driving: <原因>` | 车不动的原因：碰撞 hold-off / 手柄接管(`/JoyState`) / `switch=false` |
+| `line acquired` | 重新锁定到线（状态切换提示） |
+
+> 这些日志默认就开（除逐帧的 `debug`），且都做了限频，不会刷屏。巡线异常时先看
+> 终端这几行，基本能直接定位是"没图 / 没线 / 多色歧义 / 被暂停"中的哪一类。
 
 ### 3) 巡线 + IMU 防撞（推荐）
 
