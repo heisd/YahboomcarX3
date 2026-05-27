@@ -84,9 +84,29 @@ ros2 launch yahboomcar_gazebo line_follow_sim.launch.py linear:=0.15 show_window
 机器人会沿黄线行驶，`line_track` 在画面下方 ROI 提取线条质心、PID 输出 `/cmd_vel`。
 黄线颜色阈值在 `config/line_hsv_sim.txt`；换线颜色时改这里即可。
 
+### 七色线 + 模式切换 + 直接选色
+
+`yahboom_lines.world` 在相机视野里铺了 **七条不同颜色的平行线**（红/橙/黄/绿/青/蓝/紫），
+配合 `mode`（检测/跟踪）与 `color`（预设颜色）参数即可：
+
+```bash
+# 检测模式：相机里能看到全部七色，鼠标框选你要的颜色学习 HSV（需有显示）
+ros2 launch yahboomcar_gazebo line_follow_sim.launch.py \
+    mode:=detect world:=$(ros2 pkg prefix yahboomcar_gazebo)/share/yahboomcar_gazebo/worlds/yahboom_lines.world
+
+# 跟踪模式：直接用预设颜色跟某一条线（无需框选）
+ros2 launch yahboomcar_gazebo line_follow_sim.launch.py \
+    mode:=track color:=green \
+    world:=$(ros2 pkg prefix yahboomcar_gazebo)/share/yahboomcar_gazebo/worlds/yahboom_lines.world
+```
+
+`color` 可选 `red/orange/yellow/green/cyan/blue/purple`，对应 `config/line_hsv_<color>.txt`
+（已按仿真渲染实测标定，每种颜色都只命中对应那条线）。`color:=`（空）则用
+`line_hsv_sim.txt`。其它颜色的线会被 HSV 掩膜忽略，所以选哪个颜色就跟哪条线。
+
 > 已在容器中用软件 GL（`xvfb` + `LIBGL_ALWAYS_SOFTWARE=1`）headless 跑通：相机出图、
-> 巡线节点每帧都能识别到线、机器人沿曲线行驶（跟踪误差约几厘米）。无 GPU 时相机渲染
-> 较慢（~3Hz），有 GPU/GUI 会流畅很多。
+> 七色线全部可见、按颜色选择能各自跟线（误差几厘米）、模式切换与诊断日志均正常。
+> 无 GPU 时相机渲染较慢（~3Hz），有 GPU/GUI 会流畅很多。
 
 ## 场景切换
 

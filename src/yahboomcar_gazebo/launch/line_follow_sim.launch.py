@@ -23,20 +23,27 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import (
+    LaunchConfiguration, PathJoinSubstitution, PythonExpression)
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     pkg = get_package_share_directory('yahboomcar_gazebo')
-    world = os.path.join(pkg, 'worlds', 'yahboom_line.world')
-    hsv_file = os.path.join(pkg, 'config', 'line_hsv_sim.txt')
+    default_world = os.path.join(pkg, 'worlds', 'yahboom_line.world')
 
     gui = LaunchConfiguration('gui')
     mode = LaunchConfiguration('mode')
+    world = LaunchConfiguration('world')
+    color = LaunchConfiguration('color')
     image_topic = LaunchConfiguration('image_topic')
     show_window = LaunchConfiguration('show_window')
     linear = LaunchConfiguration('linear')
+
+    # color:='' -> line_hsv_sim.txt; color:=green -> line_hsv_green.txt, etc.
+    hsv_name = PythonExpression(
+        ["'line_hsv_' + ('", color, "' or 'sim') + '.txt'"])
+    hsv_file = PathJoinSubstitution([pkg, 'config', hsv_name])
 
     is_detect = IfCondition(PythonExpression(["'", mode, "' == 'detect'"]))
     is_track = IfCondition(PythonExpression(["'", mode, "' == 'track'"]))
@@ -47,6 +54,17 @@ def generate_launch_description():
                               description='track = follow the line; '
                                           'detect = box-select to learn HSV'),
         DeclareLaunchArgument('gui', default_value='true'),
+        DeclareLaunchArgument(
+            'world', default_value=default_world,
+            description='World file. Use yahboom_lines.world to see all '
+                        'seven coloured lines for colour picking.'),
+        DeclareLaunchArgument(
+            'color', default_value='',
+            choices=['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue',
+                     'purple'],
+            description='Preset line colour to follow in track mode: '
+                        'red/orange/yellow/green/cyan/blue/purple. '
+                        'Empty = use line_hsv_sim.txt (or detect-learned).'),
         DeclareLaunchArgument('image_topic', default_value='/camera/image_raw'),
         DeclareLaunchArgument('show_window', default_value='false',
                               description='track-mode OpenCV debug window '

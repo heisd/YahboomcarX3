@@ -44,6 +44,7 @@ from .line_common import (
     read_hsv,
     mask_with_hsv,
     largest_contour_centroid,
+    count_blobs,
     SimplePID,
 )
 
@@ -74,6 +75,8 @@ class LineTrack(Node):
         self.declare_parameter('kd', 0.4)
         self.declare_parameter('show_window', True)
         self.declare_parameter('switch', True)
+        # Verbose per-frame diagnostics (error/centroid/area/blob count).
+        self.declare_parameter('debug', False)
         # Glue with yahboomcar_collision: when a True pulse arrives on
         # `collision_topic`, stop publishing motion for `collision_pause_sec`
         # seconds and reset the PID. Set the topic empty to disable.
@@ -144,6 +147,11 @@ class LineTrack(Node):
         self.timer = self.create_timer(0.03, self._tick)
         self._t_prev = time.time()
 
+        # diagnostics state
+        self._tracking = False          # were we locked onto a line last tick?
+        self._no_frame_since = time.time()
+        self._frames_seen = 0
+
     def _on_image(self, msg):
         try:
             self._frame = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -186,7 +194,17 @@ class LineTrack(Node):
     def _tick(self):
         ok, frame = self._grab()
         if not ok or frame is None:
+            # No image yet / stale stream -- a frequent "robot does nothing"
+            # cause. Warn (throttled) so it is not silent.
+            src = self.image_topic or f'camera index {self.cam_index}'
+            self.get_logger().warn(
+                f'no frame from {src} ({time.time() - self._no_frame_since:.1f}s '
+                f'since last); is the camera/topic publishing?',
+                throttle_duration_sec=3.0)
             return
+        self._no_frame_since = time.time()
+        self._frames_seen += 1
+        debug = bool(self.get_parameter('debug').value)
         frame = cv.resize(frame, (self.w, self.h))
         self._refresh_params()
 
@@ -199,8 +217,23 @@ class LineTrack(Node):
             y1 = self.h
         band = frame[y0:y1]
 
+        if not self.hsv_range:
+            self.get_logger().error(
+                'no HSV range loaded -- run line_detect or set hsv_file',
+                throttle_duration_sec=5.0)
+            return
+
         binary = mask_with_hsv(band, self.hsv_range)
         centroid = largest_contour_centroid(binary)
+        blobs = count_blobs(binary)
+
+        # Ambiguity: more than one blob means the HSV matches several lines
+        # (e.g. two colours), which makes the centroid jump between them.
+        if blobs > 1:
+            self.get_logger().warn(
+                f'{blobs} blobs in ROI -- HSV may match more than one line/'
+                f'colour; tighten hsv_file or narrow the ROI',
+                throttle_duration_sec=2.0)
 
         twist = Twist()
         in_collision_hold = self.get_clock().now() < self._collision_hold_until
@@ -211,11 +244,37 @@ class LineTrack(Node):
         if in_collision_hold:
             self.pid.reset()
 
+        # Explain (throttled) why we are not driving, so a "stuck" robot is
+        # diagnosable from the logs.
+        if not enabled:
+            if in_collision_hold:
+                reason = 'collision hold-off'
+            elif self.joy_active:
+                reason = 'joystick takeover (/JoyState)'
+            else:
+                reason = 'switch parameter is false'
+            self.get_logger().info(
+                f'not driving: {reason}', throttle_duration_sec=3.0)
+
         if centroid is not None:
-            cx, cy, _area, cnt = centroid
+            cx, cy, area, cnt = centroid
             # normalized lateral error in [-1, 1]; positive = line is to the right
             err = (cx - self.w / 2.0) / (self.w / 2.0)
             ang = self.pid.step(err)
+            if not self._tracking:
+                self.get_logger().info('line acquired')
+                self._tracking = True
+            # near the frame edge the line is about to leave view
+            if abs(err) > 0.85:
+                self.get_logger().warn(
+                    f'line near frame edge (err={err:+.2f}); may be lost soon '
+                    f'-- slow down or widen the camera view',
+                    throttle_duration_sec=2.0)
+            if debug:
+                self.get_logger().info(
+                    f'err={err:+.2f} cx={cx} area={area:.0f} blobs={blobs} '
+                    f'ang={ang:+.2f} enabled={enabled}',
+                    throttle_duration_sec=0.5)
             if enabled:
                 twist.linear.x = linear
                 twist.angular.z = float(-ang)  # turn toward the line
@@ -227,6 +286,15 @@ class LineTrack(Node):
                            (0, 255, 255), 1)
         else:
             self.pid.reset()
+            if self._tracking:
+                self.get_logger().warn(
+                    'line lost -- no blob >= min_area in ROI; stopping steering',
+                    throttle_duration_sec=2.0)
+                self._tracking = False
+            else:
+                self.get_logger().warn(
+                    'no line detected -- check HSV / lighting / camera_pitch / '
+                    'ROI band', throttle_duration_sec=3.0)
             if self.show:
                 cv.putText(frame, 'no line', (10, 20),
                            cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
