@@ -352,8 +352,16 @@ void ImageConverter::depthCb(const std::shared_ptr<sensor_msgs::msg::Image> msg)
         	std::cout<<"minDist: "<<minDist<<std::endl;
             if (abs(distance - this->minDist) < 0.1) linear_speed = 0;
             else linear_speed = -linear_PID->compute(this->minDist, distance);//-linear_PID->compute(minDist, distance)
+        } else {
+            // 五点全无效：本帧没有可信距离，前进/后退速度归零并复位 PID，
+            // 避免沿用上一帧旧值盲目前冲、以及恢复时的微分冲击；
+            // 转向仍按视觉中心保持对准目标。
+            linear_speed = 0;
+            linear_PID->reset();
         }
-        rotation_speed = angular_PID->compute(320 / 100.0, center_x / 100.0);//angular_PID->compute(320 / 100.0, center_x / 100.0)
+        // 用实际图像宽度的中心，而不是硬编码 320：换相机分辨率时也能正确居中。
+        double frame_cx = rgbimage.empty() ? 320.0 : rgbimage.cols / 2.0;
+        rotation_speed = angular_PID->compute(frame_cx / 100.0, center_x / 100.0);
         if (abs(rotation_speed) < 0.1)rotation_speed = 0;
         geometry_msgs::msg::Twist twist;
         twist.linear.x = linear_speed;
