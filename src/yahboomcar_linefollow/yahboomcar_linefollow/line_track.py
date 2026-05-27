@@ -380,21 +380,33 @@ class LineTrack(Node):
         now = self.get_clock().now()
         in_collision_hold = now < self._collision_hold_until
         switch_on = bool(self.get_parameter('switch').value)
+        enable_qr = bool(self.get_parameter('enable_qr').value)
         manual_or_safety = self.joy_active or in_collision_hold
-        enabled = switch_on and not manual_or_safety
+        # Master gate for *all* autonomy: a joystick takeover, the collision
+        # stop, OR `switch` being false each disable both line following and
+        # QR maneuvers. Anything below that should drive only when this is False.
+        autonomy_off = manual_or_safety or not switch_on
         linear = float(self.get_parameter('linear').value)
         if in_collision_hold:
             self.pid.reset()
 
-        # Manual override or the safety stop cancel any QR maneuver in flight.
-        if manual_or_safety and self._qr_state is not None:
+        # Drop any QR maneuver in flight the instant autonomy is disabled
+        # (manual/safety override, master `switch` off) or QR itself is turned
+        # off. Without this a latched stop or a timed turn would keep publishing
+        # motion after autonomy was supposed to stop the car.
+        if self._qr_state is not None and (autonomy_off or not enable_qr):
             self._qr_state = None
+            self.pid.reset()
 
-        # QR priority: scan the frame and (re)arm a fork-road maneuver.
-        # enable_qr is re-read every tick so `ros2 param set` takes effect live.
-        enable_qr = bool(self.get_parameter('enable_qr').value)
-        if enable_qr and self._qr is not None and not manual_or_safety:
+        # QR priority: scan the frame and (re)arm a fork-road maneuver. Gated by
+        # the same master `switch` as line following so a code seen while
+        # stopped cannot immediately drive the car. enable_qr is re-read every
+        # tick so `ros2 param set` takes effect live.
+        if enable_qr and self._qr is not None and not autonomy_off:
             self._maybe_detect_qr(frame, now)
+
+        enabled = switch_on and not manual_or_safety
+        qr_label = ''
 
         # Explain (throttled) why we are not driving, so a "stuck" robot is
         # diagnosable from the logs.
@@ -408,8 +420,7 @@ class LineTrack(Node):
             self.get_logger().info(
                 f'not driving: {reason}', throttle_duration_sec=3.0)
 
-        qr_label = ''
-        if self._qr_state is not None and not manual_or_safety:
+        if self._qr_state is not None and not autonomy_off:
             # The QR maneuver owns /cmd_vel; the line PID is bypassed this tick.
             twist, still = self._qr_maneuver_twist()
             qr_label = self._qr_state['type']
