@@ -63,6 +63,10 @@ class SharedState:
             'voltage': None,
             'edition': None,
             'safety_ok': None,
+            # low-battery mode state: 0=normal, 1=low (buzzer), 2=critical (stop)
+            'battery_state': None,
+            # filtered battery percentage published by the driver
+            'battery_pct': None,
             # commanded velocity
             'cmd_vel': {'vx': 0.0, 'vy': 0.0, 'vz': 0.0,
                         'wx': 0.0, 'wy': 0.0, 'wz': 0.0},
@@ -114,6 +118,9 @@ class SharedState:
             'cmd_vel': 2.0,
             'safety': 5.0,
             'joy': 5.0,
+            # battery_state has its own freshness so a dead state-publisher
+            # is detectable even while /voltage keeps streaming
+            'battery': 3.0,
         }
         devices = {}
         for dev, timeout in timeouts.items():
@@ -145,6 +152,10 @@ class DashboardNode(Node):
         self.create_subscription(Float32, 'voltage', self._on_voltage, 10)
         self.create_subscription(Float32, 'edition', self._on_edition, 10)
         self.create_subscription(Bool, 'safety_status', self._on_safety, 10)
+        self.create_subscription(
+            Int32, 'battery_state', self._on_battery_state, 10)
+        self.create_subscription(
+            Float32, 'battery_pct', self._on_battery_pct, 10)
         self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
         self.create_subscription(Twist, 'vel_raw', self._on_vel_raw, 10)
         self.create_subscription(Odometry, 'odom', self._on_odom, 10)
@@ -227,6 +238,14 @@ class DashboardNode(Node):
     def _on_safety(self, msg: Bool):
         self.state.set('safety_ok', bool(msg.data))
         self.state.touch('safety', self._now())
+
+    def _on_battery_state(self, msg: Int32):
+        self.state.set('battery_state', int(msg.data))
+        self.state.touch('battery', self._now())
+
+    def _on_battery_pct(self, msg: Float32):
+        self.state.set('battery_pct', round(float(msg.data), 1))
+        self.state.touch('battery', self._now())
 
     def _on_cmd_vel(self, msg: Twist):
         self.state.set('cmd_vel', {
