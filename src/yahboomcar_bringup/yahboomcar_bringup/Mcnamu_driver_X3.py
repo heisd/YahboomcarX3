@@ -24,6 +24,11 @@ car_type_dic={
     'X3':1,
     'NONE':-1
 }
+
+# 低电量模式状态 / Low-battery mode states
+BATTERY_NORMAL = 0    # 正常
+BATTERY_LOW = 1       # 低电量 (蜂鸣器报警)
+BATTERY_CRITICAL = 2  # 临界电量 (强制停车)
 class yahboomcar_driver(Node):
 	def __init__(self, name):
 		super().__init__(name)
@@ -62,6 +67,51 @@ class yahboomcar_driver(Node):
 		self.last_speed = [0.0, 0.0, 0.0]  # 最后发送的速度
 		self.is_safety_stopped = False  # 是否因超时停止了
 
+		# 低电量保护参数 (类似手机电量模式)
+		# Low-battery protection parameters (inspired by phone battery saver)
+		self.declare_parameter('enable_low_battery_protection', True)
+		self.enable_low_battery_protection = self.get_parameter(
+			'enable_low_battery_protection').get_parameter_value().bool_value
+		# 电池电压标定 (X3 默认 3S 锂电: 9.0V 空 -> 12.6V 满，与仪表盘一致)
+		self.declare_parameter('battery_voltage_full', 12.6)
+		self.battery_voltage_full = self.get_parameter(
+			'battery_voltage_full').get_parameter_value().double_value
+		self.declare_parameter('battery_voltage_empty', 9.0)
+		self.battery_voltage_empty = self.get_parameter(
+			'battery_voltage_empty').get_parameter_value().double_value
+		# 两档阈值 (%)：低电量蜂鸣器，临界电量停车
+		self.declare_parameter('battery_warning_pct', 20.0)
+		self.battery_warning_pct = self.get_parameter(
+			'battery_warning_pct').get_parameter_value().double_value
+		self.declare_parameter('battery_critical_pct', 5.0)
+		self.battery_critical_pct = self.get_parameter(
+			'battery_critical_pct').get_parameter_value().double_value
+		# 滞回 (%): 高于阈值 +hysteresis 才能回到上一档，防止抖动
+		self.declare_parameter('battery_hysteresis_pct', 2.0)
+		self.battery_hysteresis_pct = self.get_parameter(
+			'battery_hysteresis_pct').get_parameter_value().double_value
+		# 蜂鸣周期 (秒)
+		self.declare_parameter('battery_warning_beep_period', 5.0)
+		self.battery_warning_beep_period = self.get_parameter(
+			'battery_warning_beep_period').get_parameter_value().double_value
+		self.declare_parameter('battery_critical_beep_period', 1.0)
+		self.battery_critical_beep_period = self.get_parameter(
+			'battery_critical_beep_period').get_parameter_value().double_value
+		# 电压低通滤波 alpha (0..1, 越小越平滑)，N 次连续越线才切换状态
+		self.declare_parameter('battery_filter_alpha', 0.2)
+		self.battery_filter_alpha = self.get_parameter(
+			'battery_filter_alpha').get_parameter_value().double_value
+		self.declare_parameter('battery_debounce_samples', 5)
+		self.battery_debounce_samples = self.get_parameter(
+			'battery_debounce_samples').get_parameter_value().integer_value
+
+		# 低电量内部状态
+		self.battery_state = BATTERY_NORMAL
+		self.battery_voltage_filtered = None
+		self._battery_pending_state = BATTERY_NORMAL
+		self._battery_pending_count = 0
+		self._last_beep_time = self.get_clock().now()
+
 		#create subcriber 创建订阅者
 		self.sub_cmd_vel = self.create_subscription(Twist,"cmd_vel",self.cmd_vel_callback,1)
 		self.sub_RGBLight = self.create_subscription(Int32,"RGBLight",self.RGBLightcallback,100)
@@ -75,10 +125,12 @@ class yahboomcar_driver(Node):
 		self.imuPublisher = self.create_publisher(Imu,"imu/data_raw",100)
 		self.magPublisher = self.create_publisher(MagneticField,"imu/mag",100)
 		self.safety_pub = self.create_publisher(Bool, "safety_status", 10) # 安全状态发布者
+		self.battery_state_pub = self.create_publisher(Int32, "battery_state", 10) # 低电量状态发布者
 
 		#create timer 创建定时器
 		self.timer = self.create_timer(0.1, self.pub_data)  # 10Hz发布数据
-		self.safety_timer = self.create_timer(0.05, self.safety_check)  # 20Hz安全检查	
+		self.safety_timer = self.create_timer(0.05, self.safety_check)  # 20Hz安全检查
+		self.battery_beep_timer = self.create_timer(0.2, self._battery_beep_tick)  # 5Hz蜂鸣调度
 
 		#create and init variable  创建并初始化变量	
 		self.edition = Float32()
@@ -101,6 +153,14 @@ class yahboomcar_driver(Node):
         # Car motion control, subscriber callback function
 		if not isinstance(msg, Twist): return
 		self.last_cmd_time = self.get_clock().now()
+        # 临界电量：拒绝下发任何运动指令，确保小车停止
+        # Critical battery: refuse motion commands and hold the car stopped
+		if (self.enable_low_battery_protection
+				and self.battery_state == BATTERY_CRITICAL):
+			if any(abs(s) > 0.01 for s in self.last_speed):
+				self.car.set_car_motion(0.0, 0.0, 0.0)
+				self.last_speed = [0.0, 0.0, 0.0]
+			return
         # 下发线速度和角速度
         # Issue linear vel and angular vel
 		vx = msg.linear.x*1.0
@@ -215,9 +275,105 @@ class yahboomcar_driver(Node):
 		self.magPublisher.publish(mag)
 		self.volPublisher.publish(battery)
 		self.EdiPublisher.publish(edition)
-		
-		
-			
+		# 更新并发布低电量状态
+		# Update and publish low-battery state
+		self._update_battery_state(battery.data)
+		state_msg = Int32()
+		state_msg.data = int(self.battery_state)
+		self.battery_state_pub.publish(state_msg)
+
+	# ---- 低电量保护辅助函数 / low-battery helpers --------------------------
+	def _voltage_to_pct(self, v):
+		rng = max(0.001, self.battery_voltage_full - self.battery_voltage_empty)
+		return max(0.0, min(100.0, (v - self.battery_voltage_empty) / rng * 100.0))
+
+	def _update_battery_state(self, raw_voltage):
+		"""低通滤波 + 滞回 + 防抖：根据电压更新 self.battery_state。"""
+		if not self.enable_low_battery_protection:
+			self.battery_state = BATTERY_NORMAL
+			return
+		# 上电瞬间或串口尚未返回时，电压可能为 0；忽略
+		if raw_voltage is None or raw_voltage <= 0.1:
+			return
+		# EMA 低通滤波，平滑掉电机启动的瞬时压降
+		a = self.battery_filter_alpha
+		if self.battery_voltage_filtered is None:
+			self.battery_voltage_filtered = raw_voltage
+		else:
+			self.battery_voltage_filtered = (
+				a * raw_voltage + (1.0 - a) * self.battery_voltage_filtered)
+		pct = self._voltage_to_pct(self.battery_voltage_filtered)
+		# 按当前状态计算目标态，恢复时需多 hysteresis 个百分点
+		h = self.battery_hysteresis_pct
+		warn = self.battery_warning_pct
+		crit = self.battery_critical_pct
+		if self.battery_state == BATTERY_NORMAL:
+			target = (BATTERY_CRITICAL if pct <= crit
+					  else BATTERY_LOW if pct <= warn
+					  else BATTERY_NORMAL)
+		elif self.battery_state == BATTERY_LOW:
+			target = (BATTERY_CRITICAL if pct <= crit
+					  else BATTERY_NORMAL if pct >= warn + h
+					  else BATTERY_LOW)
+		else:  # BATTERY_CRITICAL
+			target = (BATTERY_NORMAL if pct >= warn + h
+					  else BATTERY_LOW if pct >= crit + h
+					  else BATTERY_CRITICAL)
+		# 防抖：连续 N 个采样都指向同一新状态才切换
+		if target == self.battery_state:
+			self._battery_pending_state = target
+			self._battery_pending_count = 0
+			return
+		if target == self._battery_pending_state:
+			self._battery_pending_count += 1
+		else:
+			self._battery_pending_state = target
+			self._battery_pending_count = 1
+		if self._battery_pending_count >= self.battery_debounce_samples:
+			old = self.battery_state
+			self.battery_state = target
+			self._battery_pending_count = 0
+			self._on_battery_state_change(old, target, pct)
+
+	def _on_battery_state_change(self, old, new, pct):
+		names = {BATTERY_NORMAL: 'NORMAL', BATTERY_LOW: 'LOW',
+				 BATTERY_CRITICAL: 'CRITICAL'}
+		v = self.battery_voltage_filtered or 0.0
+		text = f"Battery {names[old]} -> {names[new]} ({pct:.1f}%, {v:.2f}V)"
+		if new == BATTERY_NORMAL:
+			self.get_logger().info(text)
+		elif new == BATTERY_LOW:
+			self.get_logger().warn(text)
+		else:
+			self.get_logger().error(text)
+		# 进入临界电量立刻停车，不等下一条 cmd_vel
+		if new == BATTERY_CRITICAL:
+			self.car.set_car_motion(0.0, 0.0, 0.0)
+			self.last_speed = [0.0, 0.0, 0.0]
+
+	def _battery_beep_tick(self):
+		"""按当前电量档位周期性地短促鸣笛。"""
+		if (not self.enable_low_battery_protection
+				or self.battery_state == BATTERY_NORMAL):
+			return
+		if self.battery_state == BATTERY_CRITICAL:
+			period = self.battery_critical_beep_period
+			duration_ms = 500
+		else:
+			period = self.battery_warning_beep_period
+			duration_ms = 200
+		now = self.get_clock().now()
+		elapsed = (now - self._last_beep_time).nanoseconds / 1e9
+		if elapsed < period:
+			return
+		self._last_beep_time = now
+		try:
+			# 硬件支持 >=10ms 自动关闭，避免与 /Buzzer 订阅冲突
+			self.car.set_beep(duration_ms)
+		except Exception as e:
+			self.get_logger().warn(f"Low-battery buzzer error: {e}")
+
+
 def main():
     rclpy.init()
     driver = yahboomcar_driver('driver_node')

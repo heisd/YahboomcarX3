@@ -63,6 +63,8 @@ class SharedState:
             'voltage': None,
             'edition': None,
             'safety_ok': None,
+            # low-battery mode state: 0=normal, 1=low (buzzer), 2=critical (stop)
+            'battery_state': None,
             # commanded velocity
             'cmd_vel': {'vx': 0.0, 'vy': 0.0, 'vz': 0.0,
                         'wx': 0.0, 'wy': 0.0, 'wz': 0.0},
@@ -145,6 +147,8 @@ class DashboardNode(Node):
         self.create_subscription(Float32, 'voltage', self._on_voltage, 10)
         self.create_subscription(Float32, 'edition', self._on_edition, 10)
         self.create_subscription(Bool, 'safety_status', self._on_safety, 10)
+        self.create_subscription(
+            Int32, 'battery_state', self._on_battery_state, 10)
         self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
         self.create_subscription(Twist, 'vel_raw', self._on_vel_raw, 10)
         self.create_subscription(Odometry, 'odom', self._on_odom, 10)
@@ -227,6 +231,10 @@ class DashboardNode(Node):
     def _on_safety(self, msg: Bool):
         self.state.set('safety_ok', bool(msg.data))
         self.state.touch('safety', self._now())
+
+    def _on_battery_state(self, msg: Int32):
+        self.state.set('battery_state', int(msg.data))
+        self.state.touch('chassis', self._now())
 
     def _on_cmd_vel(self, msg: Twist):
         self.state.set('cmd_vel', {

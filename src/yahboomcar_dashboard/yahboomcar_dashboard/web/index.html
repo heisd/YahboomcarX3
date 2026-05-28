@@ -248,6 +248,7 @@
     <div class="bar"><div id="vbar" style="width:0%"></div></div>
     <div class="kv" style="margin-top:14px">
       <div class="k">固件版本</div><div class="v" id="edition">--</div>
+      <div class="k">电量模式</div><div class="v" id="battery-mode">--</div>
       <div class="k">安全状态</div><div class="v" id="safety">--</div>
       <div class="k">碰撞</div><div class="v" id="collision">--</div>
       <div class="k">手柄接管</div><div class="v" id="joy">--</div>
@@ -539,6 +540,22 @@ function renderFlag(id, val, okText, badText) {
     : `<span class="badge err">${badText}</span>`;
 }
 
+// 低电量模式: 0=正常, 1=低电量(蜂鸣), 2=临界(停车)
+function renderBatteryMode(state) {
+  const el = document.getElementById('battery-mode');
+  if (state === null || state === undefined) {
+    el.innerHTML = '<span class="badge warn">未知</span>';
+    return;
+  }
+  if (state === 0) {
+    el.innerHTML = '<span class="badge ok">正常</span>';
+  } else if (state === 1) {
+    el.innerHTML = '<span class="badge warn">低电量 (蜂鸣)</span>';
+  } else {
+    el.innerHTML = '<span class="badge err">临界 (停车)</span>';
+  }
+}
+
 async function poll() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
@@ -550,6 +567,7 @@ async function poll() {
 
     renderDevices(s.devices);
     renderBattery(s.voltage);
+    renderBatteryMode(s.battery_state);
     document.getElementById('edition').textContent =
       s.edition === null ? '--' : ('v' + s.edition);
     renderFlag('safety',    s.safety_ok, '正常', '触发');
