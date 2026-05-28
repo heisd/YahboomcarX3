@@ -432,6 +432,7 @@ const DEVICE_LABELS = {
   cmd_vel: '控制指令 (/cmd_vel)',
   safety:  '安全状态 (/safety_status)',
   joy:     '手柄 (/JoyState)',
+  battery: '电量监控 (/battery_state)',
 };
 
 const fmt = (n, d=3) => (n === null || n === undefined || isNaN(n))
@@ -520,12 +521,18 @@ function renderDevices(devices) {
   root.innerHTML = html;
 }
 
-function renderBattery(v) {
+function renderBattery(v, driverPct) {
   document.getElementById('voltage').textContent = v === null ? '--' : v.toFixed(2);
-  // X3 uses 3S Li-ion roughly 9.0V (empty) -> 12.6V (full)
-  let pct = 0;
-  if (v !== null) {
+  // Prefer the driver-published filtered percentage (uses the same
+  // battery_voltage_full/empty params as the FSM); fall back to a 3S Li-ion
+  // estimate (9.0V empty -> 12.6V full) when /battery_pct is not yet seen.
+  let pct;
+  if (driverPct !== null && driverPct !== undefined) {
+    pct = Math.max(0, Math.min(100, driverPct));
+  } else if (v !== null) {
     pct = Math.max(0, Math.min(100, (v - 9.0) / (12.6 - 9.0) * 100));
+  } else {
+    pct = 0;
   }
   const bar = document.getElementById('vbar');
   bar.style.width = pct + '%';
@@ -566,7 +573,7 @@ async function poll() {
     document.querySelector('#conn-status .dot').className = 'dot ok';
 
     renderDevices(s.devices);
-    renderBattery(s.voltage);
+    renderBattery(s.voltage, s.battery_pct);
     renderBatteryMode(s.battery_state);
     document.getElementById('edition').textContent =
       s.edition === null ? '--' : ('v' + s.edition);
