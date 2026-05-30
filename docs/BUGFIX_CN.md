@@ -67,6 +67,22 @@
 
 ---
 
+### 12. `yahboomcar_laser/laser_Avoidance_a1_X3.py` — 避障决策树重写(死分支 + 漏判 + 阈值不一致)
+- **现象**:`registerScan` 里的 if/elif 决策链存在多处问题:
+  - 第 105-109、118-122 行的内层 `if` 条件与外层互相矛盾,**永远不会执行**(死代码);
+  - 第 132-137 行 `front<10 & L>10 & R>10` 被前面第 98 行 `front<=10 & L>10 & R>10` 完全覆盖,也是死代码;
+  - **漏掉了"前方+右侧有障碍、左侧空"这一组合**,该情况下小车不发任何指令,可能直接撞上;
+  - 同一套判断混用 `>10` / `<10` / `<=10`,计数正好等于 10 时存在"谁都不匹配"的空隙。
+- **修复**:把整段决策链重写为覆盖全部 8 种 F/L/R 组合、互斥且无遗漏的结构(转向约定沿用原代码:右转 `z=-angular`、左转 `z=+angular`):
+  - 前方有障碍 → 转向较空的一侧;两侧都堵则原地右转找出口;
+  - 前方空、仅单侧有障碍 → 转向另一侧;
+  - 前方空、两侧都近 → 直行通过;
+  - 无障碍 → 前进。
+- **注意**:这是会改变实车避障行为的改动,逻辑已做到正确完整,但具体转向时机/时长建议在实车上再微调。
+- **未改动的同类文件**:`laser_Avoidance_4ROS.py`、`laser_Avoidance_a1_R2-Copy1.py` 有类似缺陷,但均未在 `setup.py` 注册为可执行入口(`-Copy1` 为遗留副本),故本次未动。
+
+---
+
 ## 三、Launch 文件 Bug(中危)
 
 ### 11. `yahboomcar_description/description_X3_multi_robot1.launch.py` 与 `..._multi_robot2.launch.py` — 参数声明顺序错误
@@ -79,9 +95,7 @@
 
 这些要么有歧义、要么属于打包/版本相关决策,贸然改可能改变现网行为,故仅列出建议:
 
-1. **`laser_Avoidance_a1_X3.py` 内层避障分支自相矛盾**(约 106、119 行):如内层 `if self.Left_warning > 10 and self.Right_warning <= 10:` 处于外层已保证 `Right_warning > 10` 的分支里,条件永真假矛盾,属死代码。原意不明,改动会影响避障行为,建议你确认意图后再调。
-
-2. **`laser_Tracker_a1_X3.py` / `laser_Warning_a1_X3.py` 把 numpy 标量赋给 Twist 字段**:`minDist` 来自 `np.array(scan_data.ranges)`,PID 输出可能是 numpy 浮点。在部分 numpy 版本(尤其 float32 / numpy 2.0 NEP50)下,赋给 `Twist.linear.x` 会触发 rclpy 类型断言。由于整套代码风格统一且出厂可运行,本次未改;若你遇到该断言,用 `float(...)` 包一层即可。
+1. **`laser_Tracker_a1_X3.py` / `laser_Warning_a1_X3.py` 把 numpy 标量赋给 Twist 字段**:`minDist` 来自 `np.array(scan_data.ranges)`,PID 输出可能是 numpy 浮点。在部分 numpy 版本(尤其 float32 / numpy 2.0 NEP50)下,赋给 `Twist.linear.x` 会触发 rclpy 类型断言。由于整套代码风格统一且出厂可运行,本次未改;若你遇到该断言,用 `float(...)` 包一层即可。
 
 3. **`yahboomcar_astra/launch/colorTracker_X3.launch.py`** 用了 Foxy 时代的 `node_executable=` / `node_name=`,在 Humble+ 已移除,会导致 launch 报 `TypeError`。如目标是 Humble,应改为 `executable=` / `name=`。
 
