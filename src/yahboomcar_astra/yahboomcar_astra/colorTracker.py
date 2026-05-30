@@ -99,7 +99,7 @@ class color_Tracker(Node):
                 distance[2] = depthFrame[int(self.Center_y - 3)][int(self.Center_x + 3)]
                 distance[3] = depthFrame[int(self.Center_y + 3)][int(self.Center_x + 3)]
                 distance[4] = depthFrame[int(self.Center_y)][int(self.Center_x)]
-                distance_ = 1000.0
+                distance_ = 0.0
                 num_depth_points = 5
                 for i in range(5):
                     if 40 < distance[i] < 80000: distance_ += distance[i]

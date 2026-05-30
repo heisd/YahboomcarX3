@@ -59,7 +59,6 @@ class laserAvoid(Node):
     # 处理激光扫描数据// 处理激光扫描数据话题
     def registerScan(self, scan_data):
         if not isinstance(scan_data, LaserScan): return
-        bot = Rosmaster(com="/dev/ttyUSB1")
         ranges = np.array(scan_data.ranges)
         self.Right_warning = 0                     # 右侧警告标志
         self.Left_warning = 0                      # 左侧警告标志

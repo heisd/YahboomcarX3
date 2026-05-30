@@ -469,7 +469,7 @@ class YahboomCarPatrol(Node):
         os.system(cmd)
         cmd3 = "ros2 topic pub --once /beep std_msgs/msg/UInt16 "
         cmd4 = '''"data: 0"'''
-        cmd = cmd1 +cmd2
+        cmd = cmd3 +cmd4
         os.system(cmd)
     
     def LaserScanCallback(self,scan_data):

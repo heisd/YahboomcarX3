@@ -20,6 +20,8 @@ from std_msgs.msg import Bool
 import PyKDL
 from time import sleep
 
+RAD2DEG = 180 / math.pi
+
 print("import finish")
 
 class YahboomCarPatrol(Node):

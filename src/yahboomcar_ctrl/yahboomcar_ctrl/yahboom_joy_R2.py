@@ -82,7 +82,7 @@ class JoyTeleop(Node):
 			elif self.angular_Gear == 3.0 / 4: self.angular_Gear = 1.0
 		xlinear_speed = self.filter_data(joy_data.axes[1]) * self.xspeed_limit * self.linear_Gear
         #ylinear_speed = self.filter_data(joy_data.axes[2]) * self.yspeed_limit * self.linear_Gear
-		ylinear_speed = self.filter_data(joy_data.axes[2]) * self.yspeed_limit * self.linear_Gear
+		ylinear_speed = self.filter_data(joy_data.axes[0]) * self.yspeed_limit * self.linear_Gear
 		angular_speed = self.filter_data(joy_data.axes[2]) * self.angular_speed_limit * self.angular_Gear
 		if xlinear_speed > self.xspeed_limit: xlinear_speed = self.xspeed_limit
 		elif xlinear_speed < -self.xspeed_limit: xlinear_speed = -self.xspeed_limit
@@ -93,7 +93,7 @@ class JoyTeleop(Node):
 		twist = Twist()
 		twist.linear.x = xlinear_speed
 		twist.linear.y = ylinear_speed
-		#twist.angular.z = angular_speed
+		twist.angular.z = angular_speed
 		if self.Joy_active == True:
 			 for i in range(3): self.pub_cmdVel.publish(twist)
         
@@ -104,14 +104,18 @@ class JoyTeleop(Node):
 		if joy_data.axes[5] == -1: self.cancel_nav()
 		if joy_data.buttons[5] == 1:
 			if self.RGBLight_index < 6:
-				self.pub_RGBLight.publish(self.RGBLight_index)
+				RGBLight_ctrl = Int32()
+				RGBLight_ctrl.data = self.RGBLight_index
+				self.pub_RGBLight.publish(RGBLight_ctrl)
                 # print ("pub RGBLight success")
 			else: self.RGBLight_index = 0
 			self.RGBLight_index += 1
 		if joy_data.buttons[7] == 1:
 			self.Buzzer_active=not self.Buzzer_active
             # print "self.Buzzer_active: ", self.Buzzer_active
-			self.pub_Buzzer.publish(self.Buzzer_active)
+			Buzzer_ctrl = Bool()
+			Buzzer_ctrl.data = self.Buzzer_active
+			self.pub_Buzzer.publish(Buzzer_ctrl)
         # 档位控制 Gear control
 		if joy_data.buttons[9] == 1:
 			if self.linear_Gear == 1.0: self.linear_Gear = 1.0 / 3
