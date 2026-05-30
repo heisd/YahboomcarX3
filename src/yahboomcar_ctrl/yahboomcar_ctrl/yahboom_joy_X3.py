@@ -103,14 +103,18 @@ class JoyTeleop(Node):
 		if joy_data.axes[5] == -1: self.cancel_nav()
 		if joy_data.buttons[5] == 1:
 			if self.RGBLight_index < 6:
-				self.pub_RGBLight.publish(self.RGBLight_index)
+				RGBLight_ctrl = Int32()
+				RGBLight_ctrl.data = self.RGBLight_index
+				self.pub_RGBLight.publish(RGBLight_ctrl)
                 # print ("pub RGBLight success")
 			else: self.RGBLight_index = 0
 			self.RGBLight_index += 1
 		if joy_data.buttons[7] == 1:
 			self.Buzzer_active=not self.Buzzer_active
             # print "self.Buzzer_active: ", self.Buzzer_active
-			self.pub_Buzzer.publish(self.Buzzer_active)
+			Buzzer_ctrl = Bool()
+			Buzzer_ctrl.data = self.Buzzer_active
+			self.pub_Buzzer.publish(Buzzer_ctrl)
         # 档位控制 Gear control
 		if joy_data.buttons[9] == 1:
 			if self.linear_Gear == 1.0: self.linear_Gear = 1.0 / 3

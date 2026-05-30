@@ -59,7 +59,6 @@ class laserAvoid(Node):
     # 处理激光扫描数据// 处理激光扫描数据话题
     def registerScan(self, scan_data):
         if not isinstance(scan_data, LaserScan): return
-        bot = Rosmaster(com="/dev/ttyUSB1")
         ranges = np.array(scan_data.ranges)
         self.Right_warning = 0                     # 右侧警告标志
         self.Left_warning = 0                      # 左侧警告标志
@@ -88,71 +87,61 @@ class laserAvoid(Node):
             return
         self.Moving = True # 标志位，用于判断是否正在移动
         twist = Twist() # 初始化运动指令
-        # 检查是否有障碍物在前方// 检查是否有障碍物在前方话题
-        if self.front_warning > 10 and self.Left_warning > 10 and self.Right_warning > 10:
-            print ('1, there are obstacles in the left and right, turn right')
-            twist.linear.x = self.linear
-            twist.angular.z = -self.angular
-            self.pub_vel.publish(twist)
-            sleep(0.2)
-        # 检查是否有障碍物在右侧// 检查是否有障碍物在右侧话题
-        elif self.front_warning <= 10 and self.Left_warning > 10 and self.Right_warning > 10:
-            print ('3, there is an obstacle in the middle right, turn left')
-            twist.linear.x = 0.0
-            twist.angular.z = self.angular
-            self.pub_vel.publish(twist)
-            sleep(0.2)
-            # 检查是否有障碍物在左侧// 检查是否有障碍物在左侧话题
-            if self.Left_warning > 10 and self.Right_warning <= 10:
+        # 决策树：F=前方 L=左侧 R=右侧，>10 视为该方向有障碍。
+        # 转向约定：右转 z=-angular，左转 z=+angular。覆盖全部 8 种组合，互斥且无遗漏。
+        if self.front_warning > 10:
+            # 前方有障碍
+            if self.Left_warning > 10 and self.Right_warning > 10:
+                # 前方及左右两侧都有障碍，原地右转寻找出口
+                print('1, obstacles in front and both sides, turn around (right)')
                 twist.linear.x = 0.0
                 twist.angular.z = -self.angular
                 self.pub_vel.publish(twist)
-                sleep(0.5)
-        # 检查是否有障碍物在左侧// 检查是否有障碍物在左侧话题
-        elif self.front_warning > 10 and self.Left_warning > 10 and self.Right_warning <= 10:
-            print ('4. There is an obstacle in the middle left, turn right')
-            twist.linear.x = 0.0
-            twist.angular.z = -self.angular
-            self.pub_vel.publish(twist)
-            sleep(0.2)
-            # 检查是否有障碍物在右侧// 检查是否有障碍物在右侧话题
-            if self.Left_warning <= 10 and self.Right_warning > 10:
+                sleep(0.2)
+            elif self.Left_warning > 10:
+                # 前方+左侧有障碍，右侧空，右转
+                print('2, obstacle in front-left, turn right')
+                twist.linear.x = 0.0
+                twist.angular.z = -self.angular
+                self.pub_vel.publish(twist)
+                sleep(0.2)
+            elif self.Right_warning > 10:
+                # 前方+右侧有障碍，左侧空，左转（原代码遗漏的组合）
+                print('3, obstacle in front-right, turn left')
                 twist.linear.x = 0.0
                 twist.angular.z = self.angular
                 self.pub_vel.publish(twist)
-                sleep(0.5)
-        # 检查是否有障碍物在前方// 检查是否有障碍物在前方话题
-        elif self.front_warning > 10 and self.Left_warning < 10 and self.Right_warning < 10:
-
-            print ('6, there is an obstacle in the middle, turn left')
-            twist.linear.x = 0.0
-            twist.angular.z = self.angular
+                sleep(0.2)
+            else:
+                # 仅前方有障碍，默认左转
+                print('4, obstacle in front, turn left')
+                twist.linear.x = 0.0
+                twist.angular.z = self.angular
+                self.pub_vel.publish(twist)
+                sleep(0.2)
+        elif self.Left_warning > 10 and self.Right_warning > 10:
+            # 前方空，但左右两侧都靠近障碍，直行通过
+            print('5, obstacles on both sides but front clear, go forward')
+            twist.linear.x = self.linear
+            twist.angular.z = 0.0
             self.pub_vel.publish(twist)
-            sleep(0.2)
-        # 检查是否有障碍物在前方// 检查是否有障碍物在前方话题
-        elif self.front_warning < 10 and self.Left_warning > 10 and self.Right_warning > 10:
-            print ('7. There are obstacles on the left and right, turn right')
-            twist.linear.x = 0.0
-            twist.angular.z = -self.angular
-            self.pub_vel.publish(twist)
-            sleep(0.4)
-        # 检查是否有障碍物在左侧// 检查是否有障碍物在左侧话题
-        elif self.front_warning < 10 and self.Left_warning > 10 and self.Right_warning <= 10:
-            print ('8, there is an obstacle on the left, turn right')
+        elif self.Left_warning > 10:
+            # 仅左侧有障碍，右转
+            print('6, obstacle on the left, turn right')
             twist.linear.x = 0.0
             twist.angular.z = -self.angular
             self.pub_vel.publish(twist)
             sleep(0.2)
-        # 检查是否有障碍物在右侧// 检查是否有障碍物在右侧话题
-        elif self.front_warning < 10 and self.Left_warning <= 10 and self.Right_warning > 10:
-            print ('9, there is an obstacle on the right, turn left')
+        elif self.Right_warning > 10:
+            # 仅右侧有障碍，左转
+            print('7, obstacle on the right, turn left')
             twist.linear.x = 0.0
             twist.angular.z = self.angular
             self.pub_vel.publish(twist)
             sleep(0.2)
-        # 检查是否有障碍物在前方// 检查是否有障碍物在前方话题
-        elif self.front_warning <= 10 and self.Left_warning <= 10 and self.Right_warning <= 10:
-            print ('10, no obstacles, go forward')
+        else:
+            # 无障碍，前进
+            print('8, no obstacles, go forward')
             twist.linear.x = self.linear
             twist.angular.z = 0.0
             self.pub_vel.publish(twist)

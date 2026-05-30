@@ -54,12 +54,12 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        robot_name_arg,
         gui_arg,
         model_arg,
         rviz_arg,
         joint_state_publisher_node,
         joint_state_publisher_gui_node,
         robot_state_publisher_node,
-        robot_name_arg
         #rviz_node
     ])

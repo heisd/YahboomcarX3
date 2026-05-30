@@ -122,6 +122,8 @@ def main():
 				count = count + 1
 				if count > 4: (x, th) = (0, 0)
 				if (key == '\x03'): break
+			twist.linear.x = 0.0
+			twist.linear.y = 0.0
 			if xspeed_switch: twist.linear.x = speed * x
 			else: twist.linear.y = speed * x
 			twist.angular.z = turn * th
